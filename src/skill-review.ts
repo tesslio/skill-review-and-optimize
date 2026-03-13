@@ -237,7 +237,7 @@ export async function runSkillOptimize(
       'tessl', 'skill', 'review',
       '--optimize', '--yes',
       '--max-iterations', String(maxIterations),
-      '--json', skillDir,
+      skillDir,
     ],
     { stdout: 'pipe', stderr: 'pipe' },
   );
@@ -267,19 +267,27 @@ export async function runSkillOptimize(
   const newContent = await Bun.file(skillFilePath).text();
   const contentChanged = newContent !== originalContent;
 
-  // Parse score from output
+  // Get after-score by running a separate review (--json not supported with --optimize)
   let afterScore = beforeScore;
-  const jsonStr = extractJson(stdout);
-  if (jsonStr) {
-    try {
-      const parsed = JSON.parse(jsonStr) as {
-        contentJudge?: { normalizedScore?: number };
-      };
-      if (typeof parsed.contentJudge?.normalizedScore === 'number') {
-        afterScore = Math.round(parsed.contentJudge.normalizedScore * 100);
+  if (contentChanged) {
+    const reviewProc = Bun.spawn(
+      ['tessl', 'skill', 'review', '--json', skillDir],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    const reviewStdout = await new Response(reviewProc.stdout).text();
+    await reviewProc.exited;
+    const jsonStr = extractJson(reviewStdout);
+    if (jsonStr) {
+      try {
+        const parsed = JSON.parse(jsonStr) as {
+          contentJudge?: { normalizedScore?: number };
+        };
+        if (typeof parsed.contentJudge?.normalizedScore === 'number') {
+          afterScore = Math.round(parsed.contentJudge.normalizedScore * 100);
+        }
+      } catch {
+        // Score parsing failed; keep beforeScore
       }
-    } catch {
-      // Score parsing failed; keep beforeScore
     }
   }
 
