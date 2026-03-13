@@ -3,7 +3,7 @@ import { getChangedSkillFiles } from './changed-files.ts';
 import { postOrUpdateComment } from './comment.ts';
 import { installTessl } from './install-tessl.ts';
 import type { SkillReviewResult } from './skill-review.ts';
-import { runSkillReview } from './skill-review.ts';
+import { parseOptimizeIterations, runSkillOptimize, runSkillReview } from './skill-review.ts';
 
 const CONCURRENCY_LIMIT = 5;
 
@@ -11,6 +11,8 @@ async function main(): Promise<void> {
   const rootPath = process.env.INPUT_PATH || '.';
   const shouldComment = process.env.INPUT_COMMENT !== 'false';
   const threshold = parseThreshold(process.env.INPUT_FAIL_THRESHOLD);
+  const optimizeEnabled = process.env.INPUT_OPTIMIZE === 'true';
+  const maxIterations = parseOptimizeIterations(process.env.INPUT_OPTIMIZE_ITERATIONS);
 
   // 1. Detect changed SKILL.md files
   const changedFiles = await getChangedSkillFiles(rootPath);
@@ -47,17 +49,51 @@ async function main(): Promise<void> {
     results.push(...batchResults);
   }
 
-  // 4. Post PR comment (may fail on fork PRs due to read-only token)
+  // 4. Run optimization if enabled
+  let optimizeSkipped = false;
+  if (optimizeEnabled) {
+    if (!process.env.TESSL_API_TOKEN) {
+      optimizeSkipped = true;
+      core.warning('Optimize requested but TESSL_API_TOKEN not provided. Skipping optimization.');
+    } else {
+      for (let i = 0; i < results.length; i += CONCURRENCY_LIMIT) {
+        const batch = results.slice(i, i + CONCURRENCY_LIMIT);
+        await Promise.all(
+          batch.map(async (result) => {
+            if (result.error) return;
+            console.log(`Optimizing ${result.skillPath}...`);
+            const optimizeResult = await runSkillOptimize(
+              result.skillPath,
+              result.score,
+              maxIterations,
+            );
+            result.optimize = optimizeResult;
+            if (optimizeResult.optimized) {
+              console.log(
+                `  ${result.skillPath}: optimized (${optimizeResult.beforeScore}% → ${optimizeResult.afterScore}%)`,
+              );
+            } else if (optimizeResult.error) {
+              console.log(`  ${result.skillPath}: optimize error: ${optimizeResult.error}`);
+            } else {
+              console.log(`  ${result.skillPath}: no optimization needed`);
+            }
+          }),
+        );
+      }
+    }
+  }
+
+  // 5. Post PR comment (may fail on fork PRs due to read-only token)
   if (shouldComment) {
     try {
-      await postOrUpdateComment(results, threshold);
+      await postOrUpdateComment(results, threshold, { skipped: optimizeSkipped });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       core.warning(`Could not post PR comment (expected for fork PRs): ${msg}`);
     }
   }
 
-  // 5. Check threshold
+  // 6. Check threshold
   if (threshold > 0) {
     const failed = results.filter((r) => !r.passed);
     if (failed.length > 0) {
