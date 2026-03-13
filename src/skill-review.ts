@@ -10,8 +10,18 @@ function scoreBar(score: number, max = 3): string {
 /** Remove filler words/phrases to keep table cells tight */
 function trimFiller(text: string): string {
   return text
-    .replace(/\b(however|therefore|additionally|furthermore|essentially|basically|actually|really|very|quite|rather|somewhat|in order to|the fact that)\b/gi, '')
+    // Multi-word filler phrases (order matters: longest first)
+    .replace(/\b(in order to|the fact that|it is worth noting that|it should be noted that|at a high level|for the most part|almost entirely|more or less)\b/gi, '')
+    // Single-word fillers
+    .replace(/\b(however|therefore|additionally|furthermore|essentially|basically|actually|really|very|quite|rather|somewhat|reasonably|relatively|generally|certainly|obviously|simply|merely|just|also|perhaps|indeed|notably)\b/gi, '')
+    // Hedging/padding phrases
+    .replace(/\b(it seems that|this means that|the skill is|the content is|this is because|there are|it is|it has)\b/gi, '')
+    // Leading conjunctions
+    .replace(/^(but|and|so|yet|though|although)\b\s*/i, '')
+    // Clean up artifacts: double spaces, leading/trailing punctuation
     .replace(/\s{2,}/g, ' ')
+    .replace(/^\s*[,;]\s*/, '')
+    .replace(/\s*[,;]\s*$/, '')
     .trim();
 }
 

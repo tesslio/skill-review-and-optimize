@@ -76,7 +76,7 @@ function formatComment(
   if (optimizeContext?.skipped) {
     footerParts.push(
       '',
-      '**Optional:** add a [Tessl API token](https://tessl.io/account/api-keys) as `TESSL_API_TOKEN` in your repo secrets. The action will suggest an optimized version automatically in future PRs.',
+      '**Optional:** add a [Tessl API token](https://tessl.io/account/api-keys?utm_source=tessl_github&utm_medium=github&utm_campaign=q1_maintainers_26) as `TESSL_API_TOKEN` in your repo secrets. The action will suggest an optimized version automatically in future PRs.',
     );
   }
 
