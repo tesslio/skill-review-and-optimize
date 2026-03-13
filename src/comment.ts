@@ -70,8 +70,6 @@ function formatComment(
 
   const footerParts = [
     '---',
-    '',
-    'You can improve your skill manually using this [guide](https://docs.tessl.io/evaluate/optimize-a-skill-using-best-practices), or reach out to [@fernandezbaptiste](https://github.com/fernandezbaptiste) if you have questions.',
   ];
 
   // Add optimize CTA if optimize was requested but no token
