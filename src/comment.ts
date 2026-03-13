@@ -15,11 +15,12 @@ function escapeMarkdown(text: string): string {
 
 const TESSL_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 21 24"><path fill="%23f8f8f8" d="M5.8 10.47c0-.21.22-.35.4-.24l3.75 2.2v4.95c0 .87.92 1.4 1.65.96l3.6-2.17v5.41l-3.6 2.12c-.69.4-1.52.4-2.2 0l-3.6-2.12zM21 16.9c0 .8-.42 1.53-1.1 1.93l-3.6 2.12V15.5l4.7-2.85zM4.7 15.4v5.53l-3.6-2.12A2.2 2.2 0 0 1 0 16.89v-4.24zM19.9 5.19c.68.4 1.1 1.13 1.1 1.93v4.23l-9.54 5.79c-.19.1-.42-.03-.42-.24v-4.46l4.57-2.7a.84.84 0 0 0 0-1.44l-4.07-2.44 4.75-2.8zm-5.65 3.59c.19.1.19.38 0 .48l-3.75 2.2-4.56-2.68a.82.82 0 0 0-1.24.73v4.61L0 11.36V7.12c0-.8.42-1.54 1.1-1.93l3.6-2.13zM9.4.3c.68-.4 1.51-.4 2.2 0l3.6 2.12-4.75 2.79L5.8 2.42z"/></svg>`;
 
-function scoreBadge(score: number, label = 'review_score'): string {
+function scoreBadge(score: number, label = 'Tessl Review Score'): string {
   const color =
     score >= 80 ? 'brightgreen' : score >= 60 ? 'yellow' : score >= 40 ? 'orange' : 'red';
   const logoParam = encodeURIComponent(TESSL_LOGO_SVG);
-  return `![score](https://img.shields.io/badge/${label}-${score}%25-${color}?logo=${logoParam})`;
+  const encodedLabel = encodeURIComponent(label).replace(/%20/g, '%20');
+  return `![score](https://img.shields.io/badge/${encodedLabel}-${score}%25-${color}?logo=${logoParam})`;
 }
 
 export interface OptimizeContext {
@@ -70,14 +71,26 @@ function formatComment(
   const footerParts = [
     '---',
     '',
-    'To improve your skill, point your Claude Code to this Tessl [guide](https://docs.tessl.io/evaluate/optimize-a-skill-using-best-practices) and ask it to *optimize* your skill. [@fernandezbaptiste](https://github.com/fernandezbaptiste) if you hit any issues.',
+    'You can improve your skill manually using this [guide](https://docs.tessl.io/evaluate/optimize-a-skill-using-best-practices), or reach out to [@fernandezbaptiste](https://github.com/fernandezbaptiste) if you have questions.',
   ];
 
   // Add optimize CTA if optimize was requested but no token
   if (optimizeContext?.skipped) {
     footerParts.push(
       '',
-      '> **Want automatic skill optimization?** Get your free API token at [tessl.io/account/api-keys](https://tessl.io/account/api-keys), add it as a repository secret (`TESSL_API_TOKEN`), and pass it to the action.',
+      '<details>',
+      '<summary>You can also optimize this skill automatically (free)</summary>',
+      '',
+      '1. Grab an API token at [tessl.io/account/api-keys](https://tessl.io/account/api-keys)',
+      '2. Add it as a repo secret called `TESSL_API_TOKEN`',
+      '3. Pass it to the action in your workflow:',
+      '   ```yaml',
+      '   tessl-token: ${{ secrets.TESSL_API_TOKEN }}',
+      '   ```',
+      '',
+      "Next time this action runs, it'll suggest an optimized version of your skill right in the PR comment.",
+      '',
+      '</details>',
     );
   }
 
