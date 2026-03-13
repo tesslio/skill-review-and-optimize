@@ -7,6 +7,14 @@ function scoreBar(score: number, max = 3): string {
   return `${filled}${empty} ${score}/${max}`;
 }
 
+/** Remove filler words/phrases to keep table cells tight */
+function trimFiller(text: string): string {
+  return text
+    .replace(/\b(however|therefore|additionally|furthermore|essentially|basically|actually|really|very|quite|rather|somewhat|in order to|the fact that)\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 /**
  * Format the evaluation object into readable markdown.
  * Handles the known shape: { scores, overall_assessment, suggestions }
@@ -21,32 +29,24 @@ function formatEvaluation(value: unknown): string {
   const eval_ = value as Record<string, unknown>;
   const parts: string[] = [];
 
-  // Format scores as a table
+  // Format scores + suggestions as a single table
   if (eval_.scores && typeof eval_.scores === 'object') {
     const scores = eval_.scores as Record<
       string,
       { score?: number; reasoning?: string }
     >;
-    parts.push('| Dimension | Score | Detail |');
-    parts.push('|-----------|-------|--------|');
-    for (const [key, val] of Object.entries(scores)) {
+    const suggestions = Array.isArray(eval_.suggestions) ? eval_.suggestions as string[] : [];
+    const entries = Object.entries(scores);
+
+    parts.push('| Dimension | Score | Detail | Suggestion |');
+    parts.push('|-----------|-------|--------|------------|');
+    for (let i = 0; i < entries.length; i++) {
+      const [key, val] = entries[i];
       const label = key.replace(/_/g, ' ');
       const bar = typeof val.score === 'number' ? scoreBar(val.score) : '—';
-      const reasoning = (val.reasoning ?? '').replace(/\|/g, '\\|');
-      parts.push(`| **${label}** | ${bar} | ${reasoning} |`);
-    }
-  }
-
-  // Overall assessment
-  if (typeof eval_.overall_assessment === 'string') {
-    parts.push('', `**Overall:** ${eval_.overall_assessment}`);
-  }
-
-  // Suggestions as a checklist
-  if (Array.isArray(eval_.suggestions) && eval_.suggestions.length > 0) {
-    parts.push('', '**Suggestions:**');
-    for (const s of eval_.suggestions) {
-      parts.push(`- ${s}`);
+      const reasoning = trimFiller(val.reasoning ?? '').replace(/\|/g, '\\|');
+      const suggestion = trimFiller(suggestions[i] ?? '').replace(/\|/g, '\\|');
+      parts.push(`| **${label}** | ${bar} | ${reasoning} | ${suggestion} |`);
     }
   }
 

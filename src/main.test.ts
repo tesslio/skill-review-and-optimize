@@ -376,13 +376,14 @@ describe('runSkillReview', () => {
 
     const result = await runSkillReview('a/SKILL.md', 0);
     expect(result.output).toContain('| Dimension |');
+    expect(result.output).toContain('| Suggestion |');
     expect(result.output).toContain('**conciseness**');
     expect(result.output).toContain('**actionability**');
     expect(result.output).toContain('Too verbose');
-    expect(result.output).toContain('**Overall:**');
-    expect(result.output).toContain('Decent skill with room for improvement.');
-    expect(result.output).toContain('**Suggestions:**');
-    expect(result.output).toContain('- Be more concise');
+    expect(result.output).toContain('Be more concise');
+    expect(result.output).toContain('Add validation steps');
+    expect(result.output).not.toContain('**Overall:**');
+    expect(result.output).not.toContain('**Suggestions:**');
     expect(result.output).not.toContain('[object Object]');
   });
 
@@ -545,9 +546,10 @@ describe('postOrUpdateComment', () => {
 
     const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     const body = callArgs.body as string;
-    expect(body).toContain('optimize this skill automatically');
+    expect(body).toContain('Tessl API token');
     expect(body).toContain('tessl.io/account/api-keys');
     expect(body).toContain('TESSL_API_TOKEN');
+    expect(body).toContain('suggest an optimized version automatically');
   });
 
   test('comment shows before/after badges when optimized', async () => {
@@ -611,7 +613,7 @@ describe('postOrUpdateComment', () => {
 
     const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     const body = callArgs.body as string;
-    expect(body).not.toContain('optimize this skill automatically');
+    expect(body).not.toContain('Tessl API token');
   });
 });
 
