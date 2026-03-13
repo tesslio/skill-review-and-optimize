@@ -38,4 +38,5 @@ runs:
         INPUT_OPTIMIZE: ${{ inputs.optimize }}
         INPUT_OPTIMIZE_ITERATIONS: ${{ inputs.optimize-iterations }}
         TESSL_API_TOKEN: ${{ inputs.tessl-token }}
+        TESSL_TOKEN: ${{ inputs.tessl-token }}
         GITHUB_TOKEN: ${{ github.token }}
