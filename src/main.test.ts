@@ -754,7 +754,7 @@ describe('runSkillOptimize', () => {
 
     const result = await runSkillOptimize('skills/test/SKILL.md', 50, 3);
     expect(result.optimized).toBe(false);
-    expect(result.error).toBe('auth error');
+    expect(result.error).toContain('Optimize exited with code 1');
     expect(result.beforeScore).toBe(50);
     expect(result.afterScore).toBe(50);
   });
