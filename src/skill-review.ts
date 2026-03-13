@@ -249,6 +249,9 @@ export async function runSkillOptimize(
 
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
+    // Log stderr for debugging (strip any token-like strings)
+    const safeStderr = stderr.replace(/[A-Za-z0-9_-]{20,}/g, '***');
+    console.warn(`tessl optimize stderr: ${safeStderr}`);
     // Restore original in case of partial write
     await Bun.write(skillFilePath, originalContent);
     // Do not include raw stderr in error — it may contain auth token from tessl CLI
