@@ -32,7 +32,7 @@ function formatEvaluation(value: unknown): string {
     for (const [key, val] of Object.entries(scores)) {
       const label = key.replace(/_/g, ' ');
       const bar = typeof val.score === 'number' ? scoreBar(val.score) : '—';
-      const reasoning = val.reasoning ?? '';
+      const reasoning = (val.reasoning ?? '').replace(/\|/g, '\\|');
       parts.push(`| **${label}** | ${bar} | ${reasoning} |`);
     }
   }
@@ -241,11 +241,12 @@ export async function runSkillOptimize(
   if (exitCode !== 0) {
     // Restore original in case of partial write
     await Bun.write(skillFilePath, originalContent);
+    // Do not include raw stderr in error — it may contain auth token from tessl CLI
     return {
       optimized: false,
       beforeScore,
       afterScore: beforeScore,
-      error: stderr || `Optimize exited with code ${exitCode}`,
+      error: `Optimize exited with code ${exitCode}. Check action logs for details.`,
     };
   }
 
