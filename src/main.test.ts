@@ -477,7 +477,7 @@ describe('postOrUpdateComment', () => {
     const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     const body = callArgs.body as string;
     expect(body).toContain('`skills/my-skill/SKILL.md`');
-    expect(body).toContain('review_score-85%25');
+    expect(body).toContain('Tessl%20Review%20Score-85%25');
     expect(body).toContain('✅');
     expect(body).toContain('Tessl Skill Review');
   });
@@ -493,7 +493,7 @@ describe('postOrUpdateComment', () => {
     const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     const body = callArgs.body as string;
     expect(body).toContain('❌');
-    expect(body).toContain('review_score-30%25');
+    expect(body).toContain('Tessl%20Review%20Score-30%25');
   });
 
   test('comment body shows ⚠️ for errored skill', async () => {
@@ -545,7 +545,7 @@ describe('postOrUpdateComment', () => {
 
     const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     const body = callArgs.body as string;
-    expect(body).toContain('Want automatic skill optimization?');
+    expect(body).toContain('optimize this skill automatically');
     expect(body).toContain('tessl.io/account/api-keys');
     expect(body).toContain('TESSL_API_TOKEN');
   });
@@ -611,7 +611,7 @@ describe('postOrUpdateComment', () => {
 
     const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     const body = callArgs.body as string;
-    expect(body).not.toContain('Want automatic skill optimization?');
+    expect(body).not.toContain('optimize this skill automatically');
   });
 });
 
