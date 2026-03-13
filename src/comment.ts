@@ -76,19 +76,7 @@ function formatComment(
   if (optimizeContext?.skipped) {
     footerParts.push(
       '',
-      '<details>',
-      '<summary>You can also optimize this skill automatically (free)</summary>',
-      '',
-      '1. Grab an API token at [tessl.io/account/api-keys](https://tessl.io/account/api-keys)',
-      '2. Add it as a repo secret called `TESSL_API_TOKEN`',
-      '3. Pass it to the action in your workflow:',
-      '   ```yaml',
-      '   tessl-token: ${{ secrets.TESSL_API_TOKEN }}',
-      '   ```',
-      '',
-      "Next time this action runs, it'll suggest an optimized version of your skill right in the PR comment.",
-      '',
-      '</details>',
+      '**Optional:** add a [Tessl API token](https://tessl.io/account/api-keys) as `TESSL_API_TOKEN` in your repo secrets. The action will suggest an optimized version automatically in future PRs.',
     );
   }
 
