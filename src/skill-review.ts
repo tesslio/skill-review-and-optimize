@@ -103,12 +103,21 @@ export function extractJson(text: string): string | null {
   return null;
 }
 
+export interface OptimizeResult {
+  optimized: boolean;
+  beforeScore: number;
+  afterScore: number;
+  optimizedContent?: string;
+  error?: string;
+}
+
 export interface SkillReviewResult {
   skillPath: string;
   passed: boolean;
   score: number;
   output: string;
   error?: string;
+  optimize?: OptimizeResult;
 }
 
 export async function runSkillReview(
@@ -190,5 +199,83 @@ export async function runSkillReview(
     passed: threshold === 0 || score >= threshold,
     score,
     output: outputParts.length > 0 ? outputParts.join('\n\n') : stdout,
+  };
+}
+
+export function parseOptimizeIterations(value: string | undefined): number {
+  const num = Number(value ?? '3');
+  if (!Number.isInteger(num) || num < 1 || num > 10) {
+    throw new Error(
+      `Invalid optimize-iterations: ${value}. Must be an integer between 1 and 10.`,
+    );
+  }
+  return num;
+}
+
+export async function runSkillOptimize(
+  skillFilePath: string,
+  beforeScore: number,
+  maxIterations: number,
+): Promise<OptimizeResult> {
+  const skillDir = dirname(skillFilePath);
+
+  // Read original content to detect changes and restore afterward
+  const originalContent = await Bun.file(skillFilePath).text();
+
+  const proc = Bun.spawn(
+    [
+      'tessl', 'skill', 'review',
+      '--optimize', '--yes',
+      '--max-iterations', String(maxIterations),
+      '--json', skillDir,
+    ],
+    { stdout: 'pipe', stderr: 'pipe' },
+  );
+
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    // Restore original in case of partial write
+    await Bun.write(skillFilePath, originalContent);
+    return {
+      optimized: false,
+      beforeScore,
+      afterScore: beforeScore,
+      error: stderr || `Optimize exited with code ${exitCode}`,
+    };
+  }
+
+  // Read potentially modified content
+  const newContent = await Bun.file(skillFilePath).text();
+  const contentChanged = newContent !== originalContent;
+
+  // Parse score from output
+  let afterScore = beforeScore;
+  const jsonStr = extractJson(stdout);
+  if (jsonStr) {
+    try {
+      const parsed = JSON.parse(jsonStr) as {
+        contentJudge?: { normalizedScore?: number };
+      };
+      if (typeof parsed.contentJudge?.normalizedScore === 'number') {
+        afterScore = Math.round(parsed.contentJudge.normalizedScore * 100);
+      }
+    } catch {
+      // Score parsing failed; keep beforeScore
+    }
+  }
+
+  // Restore original file (suggestion-only mode)
+  await Bun.write(skillFilePath, originalContent);
+
+  return {
+    optimized: contentChanged,
+    beforeScore,
+    afterScore,
+    optimizedContent: contentChanged ? newContent : undefined,
   };
 }

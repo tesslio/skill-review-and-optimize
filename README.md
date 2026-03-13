@@ -1,15 +1,13 @@
-# Tessl Skill Review Action
+# Tessl Skill Review & Optimize Action
 
-A GitHub Action that automatically reviews `SKILL.md` files changed in a pull request and posts the results as a PR comment.
-
-**No authentication required.** This action runs `tessl skill review` locally — no Tessl account or API token needed. The only token used is the GitHub-provided `GITHUB_TOKEN` for posting PR comments.
+A GitHub Action that reviews `SKILL.md` files changed in a pull request and optionally optimizes them with AI-powered suggestions.
 
 ## Usage
 
-Add this workflow to your repository at `.github/workflows/skill-review.yml`:
+### Review only (no authentication required)
 
 ```yaml
-name: Tessl Skill Review
+name: Skill Review
 on:
   pull_request:
     paths: ['**/SKILL.md']
@@ -22,10 +20,29 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: tesslio/skill-review@main
+      - uses: tesslio/skill-review-and-optimize@main
 ```
 
-That's it. Any PR that modifies a `SKILL.md` file will get an automated review comment.
+Any PR that modifies a `SKILL.md` file gets an automated review comment with scores and feedback.
+
+### Review + Optimize (requires Tessl API token)
+
+```yaml
+- uses: tesslio/skill-review-and-optimize@main
+  with:
+    optimize: true
+    tessl-token: ${{ secrets.TESSL_API_TOKEN }}
+```
+
+When optimize is enabled, the action reviews each skill, then runs AI-powered optimization and posts the suggested improved `SKILL.md` content directly in the PR comment.
+
+#### Getting a TESSL_API_TOKEN
+
+1. Sign up or log in at [tessl.io](https://tessl.io)
+2. Get your API token at [tessl.io/account/api-keys](https://tessl.io/account/api-keys)
+3. Add it as a repository secret named `TESSL_API_TOKEN`
+
+No CLI install or workspace setup required.
 
 ## Inputs
 
@@ -34,13 +51,14 @@ That's it. Any PR that modifies a `SKILL.md` file will get an automated review c
 | `path` | Root path to search for SKILL.md files | `.` |
 | `comment` | Whether to post results as a PR comment | `true` |
 | `fail-threshold` | Minimum score (0-100) to pass. Set to `0` to never fail. | `0` |
+| `optimize` | Run skill optimization after review (requires `tessl-token`) | `false` |
+| `optimize-iterations` | Max optimization iterations (1-10) | `3` |
+| `tessl-token` | Tessl API token for optimize mode | _(optional)_ |
 
 ### Setting a quality gate
 
-To enforce a minimum skill quality score, set `fail-threshold`:
-
 ```yaml
-- uses: tesslio/skill-review@main
+- uses: tesslio/skill-review-and-optimize@main
   with:
     fail-threshold: 70
 ```
@@ -52,18 +70,22 @@ PRs with any skill scoring below 70% will fail the check.
 1. Detects which `SKILL.md` files were changed in the PR
 2. Installs the [Tessl CLI](https://tessl.io)
 3. Runs `tessl skill review` on each changed skill
-4. Posts (or updates) a review comment on the PR with scores and detailed feedback
-5. Optionally fails the check if any score is below the threshold
+4. If `optimize: true` and `tessl-token` is provided, runs optimization and captures suggested improvements
+5. Posts (or updates) a review comment on the PR with scores, feedback, and optimization suggestions
+6. Optionally fails the check if any score is below the threshold
+
+When optimize is enabled but no token is provided, the action runs review-only and includes a prompt in the comment to set up optimization.
 
 ## Comment behavior
 
-The action posts a single comment per PR. On subsequent pushes, it updates the existing comment rather than creating a new one.
+The action posts a single comment per PR. On subsequent pushes, it updates the existing comment rather than creating a new one. Optimized skills show before/after score badges and the suggested content in a collapsible section.
 
 ## Local development
 
 ```bash
 bun install
 bun run lint
+bun test
 ```
 
 ## License
