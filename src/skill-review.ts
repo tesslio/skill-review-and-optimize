@@ -51,7 +51,7 @@ function formatEvaluation(value: unknown): string {
     parts.push('| Dimension | Score | Detail | Suggestion |');
     parts.push('|-----------|-------|--------|------------|');
     for (let i = 0; i < entries.length; i++) {
-      const [key, val] = entries[i];
+      const [key, val] = entries[i]!;
       const label = key.replace(/_/g, ' ');
       const bar = typeof val.score === 'number' ? scoreBar(val.score) : '—';
       const reasoning = trimFiller(val.reasoning ?? '').replace(/\|/g, '\\|');
