@@ -1,7 +1,9 @@
 import * as github from '@actions/github';
 import type { SkillReviewResult } from './skill-review.ts';
 
-const COMMENT_MARKER = '<!-- tessl-skill-review -->';
+export const COMMENT_MARKER = '<!-- tessl-skill-review -->';
+const OPTIMIZE_START = (path: string) => `<!-- tessl-optimized:${path} -->`;
+const OPTIMIZE_END = (path: string) => `<!-- /tessl-optimized:${path} -->`;
 
 /** Escape text for safe inclusion in markdown code fences */
 function escapeForCodeFence(text: string): string {
@@ -54,7 +56,12 @@ function formatComment(
       const afterBadge = scoreBadge(result.optimize.afterScore, 'after');
       body = ` ${beforeBadge} → ${afterBadge}\n\n`;
       body += `<details>\n<summary>Review Details</summary>\n\n${result.output}\n\n</details>\n\n`;
-      body += `<details>\n<summary>Suggested optimized SKILL.md</summary>\n\n\`\`\`markdown\n${escapeForCodeFence(result.optimize.optimizedContent ?? '')}\n\`\`\`\n\n</details>\n`;
+      body += `<details>\n<summary>Suggested optimized SKILL.md</summary>\n\n`;
+      body += `${OPTIMIZE_START(result.skillPath)}\n`;
+      body += `\`\`\`markdown\n${escapeForCodeFence(result.optimize.optimizedContent ?? '')}\n\`\`\`\n`;
+      body += `${OPTIMIZE_END(result.skillPath)}\n`;
+      body += `\n</details>\n`;
+      body += `\nComment \`/apply-optimize\` to apply this change directly to the PR.\n`;
     } else if (result.optimize && !result.optimize.optimized && !result.optimize.error) {
       // Optimize ran but no changes needed
       const badge = result.score >= 0 ? ` ${scoreBadge(result.score)}${emoji}` : '';

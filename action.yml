@@ -4,6 +4,9 @@ branding:
   icon: zap
   color: purple
 inputs:
+  mode:
+    description: 'Action mode: "review" (default) or "apply" (commit optimized content from a previous review)'
+    default: 'review'
   path:
     description: 'Root path to search for SKILL.md files'
     default: '.'
@@ -29,7 +32,9 @@ runs:
     - run: bun install --production --frozen-lockfile
       shell: bash
       working-directory: ${{ github.action_path }}
-    - run: bun ${{ github.action_path }}/src/main.ts
+    - name: Run review
+      if: inputs.mode == 'review'
+      run: bun ${{ github.action_path }}/src/main.ts
       shell: bash
       env:
         INPUT_PATH: ${{ inputs.path }}
@@ -39,4 +44,10 @@ runs:
         INPUT_OPTIMIZE_ITERATIONS: ${{ inputs.optimize-iterations }}
         TESSL_API_TOKEN: ${{ inputs.tessl-token }}
         TESSL_TOKEN: ${{ inputs.tessl-token }}
+        GITHUB_TOKEN: ${{ github.token }}
+    - name: Apply optimization
+      if: inputs.mode == 'apply'
+      run: bun ${{ github.action_path }}/src/apply.ts
+      shell: bash
+      env:
         GITHUB_TOKEN: ${{ github.token }}

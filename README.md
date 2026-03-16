@@ -34,7 +34,37 @@ Any PR that modifies a `SKILL.md` file gets an automated review comment with sco
     tessl-token: ${{ secrets.TESSL_API_TOKEN }}
 ```
 
-When optimize is enabled, the action reviews each skill, then runs AI-powered optimization and posts the suggested improved `SKILL.md` content directly in the PR comment.
+When optimize is enabled, the action reviews each skill, then runs AI-powered optimization and posts the suggested improved `SKILL.md` content directly in the PR comment. Users can then comment `/apply-optimize` to commit the optimized content to the PR branch.
+
+### Apply optimized content (via `/apply-optimize` comment)
+
+Add a second workflow to let PR authors apply suggested optimizations with a single comment:
+
+```yaml
+name: Apply Skill Optimization
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  apply:
+    if: >
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/apply-optimize')
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: tesslio/skill-review-and-optimize@main
+        with:
+          mode: apply
+```
+
+When a user comments `/apply-optimize` on a PR that has a Tessl review comment with optimization suggestions, this workflow extracts the optimized content and commits it directly to the PR branch.
 
 #### Getting a TESSL_API_TOKEN
 
@@ -48,6 +78,7 @@ No CLI install or workspace setup required.
 
 | Input | Description | Default |
 |---|---|---|
+| `mode` | Action mode: `review` or `apply` | `review` |
 | `path` | Root path to search for SKILL.md files | `.` |
 | `comment` | Whether to post results as a PR comment | `true` |
 | `fail-threshold` | Minimum score (0-100) to pass. Set to `0` to never fail. | `0` |
@@ -73,6 +104,7 @@ PRs with any skill scoring below 70% will fail the check.
 4. If `optimize: true` and `tessl-token` is provided, runs optimization and captures suggested improvements
 5. Posts (or updates) a review comment on the PR with scores, feedback, and optimization suggestions
 6. Optionally fails the check if any score is below the threshold
+7. If a user comments `/apply-optimize`, the apply workflow extracts optimized content from the review comment and commits it to the PR branch
 
 When optimize is enabled but no token is provided, the action runs review-only and includes a prompt in the comment to set up optimization.
 
