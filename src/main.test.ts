@@ -575,7 +575,7 @@ describe('postOrUpdateComment', () => {
     const body = callArgs.body as string;
     expect(body).toContain('before-60%25');
     expect(body).toContain('after-90%25');
-    expect(body).toContain('Suggested optimized SKILL.md');
+    expect(body).toContain('View full optimized SKILL.md');
     expect(body).toContain('Improved content');
   });
 
