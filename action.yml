@@ -28,6 +28,17 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Acknowledge apply trigger
+      if: inputs.mode == 'apply' && github.event.comment.id
+      shell: bash
+      run: |
+        curl -sS -X POST \
+          -H "Authorization: token $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          "$GITHUB_API_URL/repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+          -d '{"content":"eyes"}'
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
     - uses: oven-sh/setup-bun@v2
     - run: bun install --production --frozen-lockfile
       shell: bash
