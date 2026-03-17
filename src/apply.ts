@@ -29,6 +29,21 @@ async function apply(): Promise<void> {
   const context = github.context;
   const octokit = github.getOctokit(token);
 
+  // Acknowledge the trigger immediately with 👀
+  const triggerCommentId = context.payload.comment?.id as number | undefined;
+  if (triggerCommentId) {
+    try {
+      await octokit.rest.reactions.createForIssueComment({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        comment_id: triggerCommentId,
+        content: 'eyes',
+      });
+    } catch {
+      // Non-critical
+    }
+  }
+
   // Get PR number from the issue_comment event
   const prNumber = context.payload.issue?.number;
   if (!prNumber) {
