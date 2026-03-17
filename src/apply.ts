@@ -149,13 +149,14 @@ async function apply(): Promise<void> {
     'git', 'commit', '-m', 'Apply optimized SKILL.md from Tessl review',
   ]);
   if (gitCommit.exitCode !== 0) {
+    const stdout = gitCommit.stdout.toString();
     const stderr = gitCommit.stderr.toString();
-    if (stderr.includes('nothing to commit')) {
+    if (stdout.includes('nothing to commit') || stderr.includes('nothing to commit')) {
       console.log('No changes to commit (files already up to date).');
       await postReply(octokit, context, prNumber, '⚠️ No changes to apply — files are already up to date.');
       return;
     }
-    throw new Error(`git commit failed: ${stderr}`);
+    throw new Error(`git commit failed: ${stderr || stdout}`);
   }
 
   const gitPush = Bun.spawnSync(['git', 'push', 'origin', `HEAD:${prBranch}`]);
