@@ -7,6 +7,15 @@ import { COMMENT_MARKER } from './comment.ts';
  * Extract optimized content blocks from a skill-review comment.
  * Returns a map of skillPath -> optimized content.
  */
+/**
+ * Extract the "Key improvements" bullet points from the review comment.
+ */
+function extractKeyImprovements(body: string): string[] {
+  const section = body.match(/\*\*Key improvements:\*\*\n((?:- .+\n?)+)/);
+  if (!section) return [];
+  return [...section[1]!.matchAll(/^- (.+)$/gm)].map(m => m[1]!);
+}
+
 function extractOptimizedContent(body: string): Map<string, string> {
   const results = new Map<string, string>();
   const regex = /<!-- tessl-optimized:(.+?) -->\n```markdown\n([\s\S]*?)\n```\n<!-- \/tessl-optimized:\1 -->/g;
@@ -170,12 +179,17 @@ async function apply(): Promise<void> {
 
   console.log('Optimization applied and pushed successfully.');
 
-  // Post confirmation comment and add rocket reaction
+  // Post confirmation comment with key improvements summary
   const files = [...optimized.keys()].map(f => `\`${f}\``).join(', ');
-  await postReply(
-    octokit, context, prNumber,
-    `✅ Applied optimized ${files} (${commitSha}). The PR has been updated.`,
-  );
+  const improvements = extractKeyImprovements(botComment.body);
+  let confirmBody = `✅ Applied optimized ${files} (${commitSha}).`;
+  if (improvements.length > 0) {
+    confirmBody += '\n\n**What changed:**';
+    for (const item of improvements.slice(0, 3)) {
+      confirmBody += `\n- ${item}`;
+    }
+  }
+  await postReply(octokit, context, prNumber, confirmBody);
 
   try {
     await octokit.rest.reactions.createForIssueComment({
