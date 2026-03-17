@@ -182,7 +182,7 @@ async function apply(): Promise<void> {
       owner: context.repo.owner,
       repo: context.repo.repo,
       comment_id: context.payload.comment?.id as number,
-      content: 'rocket',
+      content: '+1',
     });
   } catch {
     // Reaction is nice-to-have, don't fail on it
