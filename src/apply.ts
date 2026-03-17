@@ -20,6 +20,25 @@ function extractOptimizedContent(body: string): Map<string, string> {
   return results;
 }
 
+async function postReply(
+  octokit: ReturnType<typeof github.getOctokit>,
+  context: typeof github.context,
+  prNumber: number,
+  body: string,
+): Promise<void> {
+  try {
+    await octokit.rest.issues.createComment({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      issue_number: prNumber,
+      body,
+    });
+  } catch {
+    // Non-critical — log but don't fail
+    console.warn('Failed to post reply comment');
+  }
+}
+
 async function apply(): Promise<void> {
   const token = process.env.GITHUB_TOKEN;
   if (!token) {
@@ -133,6 +152,7 @@ async function apply(): Promise<void> {
     const stderr = gitCommit.stderr.toString();
     if (stderr.includes('nothing to commit')) {
       console.log('No changes to commit (files already up to date).');
+      await postReply(octokit, context, prNumber, '⚠️ No changes to apply — files are already up to date.');
       return;
     }
     throw new Error(`git commit failed: ${stderr}`);
@@ -143,9 +163,19 @@ async function apply(): Promise<void> {
     throw new Error(`git push failed: ${gitPush.stderr.toString()}`);
   }
 
+  // Get the commit SHA for the confirmation message
+  const gitRev = Bun.spawnSync(['git', 'rev-parse', 'HEAD']);
+  const commitSha = gitRev.stdout.toString().trim().slice(0, 7);
+
   console.log('Optimization applied and pushed successfully.');
 
-  // Add a reaction to the trigger comment
+  // Post confirmation comment and add rocket reaction
+  const files = [...optimized.keys()].map(f => `\`${f}\``).join(', ');
+  await postReply(
+    octokit, context, prNumber,
+    `✅ Applied optimized ${files} (${commitSha}). The PR has been updated.`,
+  );
+
   try {
     await octokit.rest.reactions.createForIssueComment({
       owner: context.repo.owner,
