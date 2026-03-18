@@ -1,4 +1,7 @@
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+
+/** Resolve the tessl CLI binary from the action's own node_modules */
+const TESSL_BIN = resolve(import.meta.dir, '..', 'node_modules', '.bin', 'tessl');
 
 /** Format a score dimension as a table row with visual bar */
 function scoreBar(score: number, max = 3): string {
@@ -136,7 +139,7 @@ export async function runSkillReview(
 ): Promise<SkillReviewResult> {
   const skillDir = dirname(skillFilePath);
 
-  const proc = Bun.spawn(['tessl', 'skill', 'review', '--json', skillDir], {
+  const proc = Bun.spawn([TESSL_BIN, 'skill', 'review', '--json', skillDir], {
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -234,7 +237,7 @@ export async function runSkillOptimize(
 
   const proc = Bun.spawn(
     [
-      'tessl', 'skill', 'review',
+      TESSL_BIN, 'skill', 'review',
       '--optimize', '--yes',
       '--max-iterations', String(maxIterations),
       skillDir,
@@ -271,7 +274,7 @@ export async function runSkillOptimize(
   let afterScore = beforeScore;
   if (contentChanged) {
     const reviewProc = Bun.spawn(
-      ['tessl', 'skill', 'review', '--json', skillDir],
+      [TESSL_BIN, 'skill', 'review', '--json', skillDir],
       { stdout: 'pipe', stderr: 'pipe' },
     );
     const reviewStdout = await new Response(reviewProc.stdout).text();
