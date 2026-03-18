@@ -1,7 +1,6 @@
 import * as core from '@actions/core';
 import { getChangedSkillFiles } from './changed-files.ts';
 import { postOrUpdateComment } from './comment.ts';
-import { installTessl } from './install-tessl.ts';
 import type { SkillReviewResult } from './skill-review.ts';
 import { parseOptimizeIterations, runSkillOptimize, runSkillReview } from './skill-review.ts';
 
@@ -26,8 +25,10 @@ async function main(): Promise<void> {
     `Found ${changedFiles.length} changed SKILL.md file(s): ${changedFiles.join(', ')}`,
   );
 
-  // 2. Install tessl CLI
-  await installTessl();
+  // 2. Register token with GitHub log masker
+  if (process.env.TESSL_API_TOKEN) {
+    core.setSecret(process.env.TESSL_API_TOKEN);
+  }
 
   // 3. Run reviews with concurrency limit
   const results: SkillReviewResult[] = [];
