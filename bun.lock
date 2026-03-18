@@ -7,6 +7,7 @@
       "dependencies": {
         "@actions/core": "^3.0.0",
         "@actions/github": "^6.0.0",
+        "tessl": "^0.73.0",
       },
       "devDependencies": {
         "@types/bun": "1.3.8",
@@ -59,6 +60,8 @@
     "deprecation": ["deprecation@2.3.1", "", {}, "sha512-xmHIy4F3scKVwMsQ4WnVaS8bHOx0DmVwRywosKhaILI0ywMDWPtBSku2HNxRvF7jtwDRsoEwYQSfbxj8b7RlJQ=="],
 
     "once": ["once@1.4.0", "", { "dependencies": { "wrappy": "1" } }, "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w=="],
+
+    "tessl": ["tessl@0.73.0", "", { "bin": { "tessl": "bin/tessl.js" } }, "sha512-K1fKZtCX0YwdNPshgYxcDS/y9xwpUGw13793hYrj3uCeZJ5QCrRhHttUiuLZkRf3OCpeXBzEe2cUcv5ROLxv6Q=="],
 
     "tunnel": ["tunnel@0.0.6", "", {}, "sha512-1h/Lnq9yajKY2PEbBadPXj3VxsDDu844OnaAo52UVmIzIvwwtBPIuNvkjuzBlTWpfJyUbG3ez0KSBibQkj4ojg=="],
 
