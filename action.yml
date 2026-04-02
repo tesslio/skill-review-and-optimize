@@ -28,17 +28,7 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Acknowledge apply trigger
-      if: inputs.mode == 'apply' && github.event.comment.id
-      shell: bash
-      run: |
-        curl -sS -X POST \
-          -H "Authorization: token $GITHUB_TOKEN" \
-          -H "Accept: application/vnd.github+json" \
-          "$GITHUB_API_URL/repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
-          -d '{"content":"eyes"}'
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
+    - uses: tesslio/setup-tessl@7b21cb04671af0bec4807758467f27c17d217172 # v1
     - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
     - run: bun install --production --frozen-lockfile
       shell: bash
