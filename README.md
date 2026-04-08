@@ -4,6 +4,8 @@ A GitHub Action that reviews `SKILL.md` files changed in a pull request and opti
 
 ## Usage
 
+Examples below pin this action to a specific commit SHA so your workflow stays reproducible and does not pick up unexpected changes from `main`. Replace the SHA when you intentionally upgrade; you can also use a [release tag](https://github.com/tesslio/skill-review-and-optimize/tags) if one is published.
+
 ### Review only (no authentication required)
 
 ```yaml
@@ -20,7 +22,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: tesslio/skill-review-and-optimize@main
+      - uses: tesslio/skill-review-and-optimize@bff9490027d60847df6494fdac7dccfb3ad82948
 ```
 
 Any PR that modifies a `SKILL.md` file gets an automated review comment with scores and feedback.
@@ -28,7 +30,7 @@ Any PR that modifies a `SKILL.md` file gets an automated review comment with sco
 ### Review + Optimize (requires Tessl API token)
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@main
+- uses: tesslio/skill-review-and-optimize@bff9490027d60847df6494fdac7dccfb3ad82948
   with:
     optimize: true
     tessl-token: ${{ secrets.TESSL_API_TOKEN }}
@@ -59,7 +61,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: tesslio/skill-review-and-optimize@main
+      - uses: tesslio/skill-review-and-optimize@bff9490027d60847df6494fdac7dccfb3ad82948
         with:
           mode: apply
 ```
@@ -89,7 +91,7 @@ No CLI install or workspace setup required.
 ### Setting a quality gate
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@main
+- uses: tesslio/skill-review-and-optimize@bff9490027d60847df6494fdac7dccfb3ad82948
   with:
     fail-threshold: 70
 ```
