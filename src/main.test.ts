@@ -629,6 +629,52 @@ describe('postOrUpdateComment', () => {
     expect(body).toContain('or `/apply-optimize` to apply all');
   });
 
+  test('optimize comment caps key improvements at 3 and strips Suggestion column', async () => {
+    listCommentsMock.mockResolvedValueOnce({ data: [] });
+
+    // Mock review output with 4 dimensions (= 4 suggestions) — should cap at 3
+    const reviewOutput = [
+      '### Review Details',
+      '',
+      '| Dimension | Score | Detail | Suggestion |',
+      '|-----------|-------|--------|------------|',
+      '| **conciseness** | ██░ 2/3 | verbose detail | suggestion one |',
+      '| **actionability** | █░░ 1/3 | vague detail | suggestion two |',
+      '| **clarity** | ██░ 2/3 | unclear detail | suggestion three |',
+      '| **structure** | ██░ 2/3 | flat detail | suggestion four |',
+    ].join('\n');
+
+    await postOrUpdateComment(
+      [{
+        skillPath: 'a/SKILL.md',
+        passed: true,
+        score: 60,
+        output: reviewOutput,
+        optimize: {
+          optimized: true,
+          beforeScore: 60,
+          afterScore: 90,
+          optimizedContent: 'Improved',
+        },
+      }],
+      0,
+    );
+
+    const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+    const body = callArgs.body as string;
+
+    // Top 3 only in Key improvements
+    expect(body).toContain('- suggestion one');
+    expect(body).toContain('- suggestion two');
+    expect(body).toContain('- suggestion three');
+    expect(body).not.toContain('- suggestion four');
+
+    // Suggestion column dropped from the table (header + data rows)
+    expect(body).not.toContain('| Suggestion |');
+    expect(body).toContain('| Dimension | Score | Detail |');
+    expect(body).not.toMatch(/\| suggestion (one|two|three|four) \|/);
+  });
+
   test('comment shows no optimization needed', async () => {
     listCommentsMock.mockResolvedValueOnce({ data: [] });
 

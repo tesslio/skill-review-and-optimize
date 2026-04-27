@@ -32,6 +32,24 @@ function extractSuggestions(output: string): string[] {
   return results;
 }
 
+/**
+ * Drop the last column from any 4-column markdown table in the text. Used to
+ * remove the "Suggestion" column from the review-details table when its
+ * contents are already shown in the "Key improvements" section above —
+ * avoiding duplication and tightening the comment.
+ */
+function stripSuggestionColumn(text: string): string {
+  return text.split('\n').map((line) => {
+    // Protect escaped pipes inside cells before counting separators
+    const protectedLine = line.replace(/\\\|/g, '\x00');
+    const pipeCount = (protectedLine.match(/\|/g) ?? []).length;
+    // 4-column row has exactly 5 unescaped pipes (start, 3 separators, end)
+    if (pipeCount !== 5) return line;
+    const stripped = protectedLine.replace(/\|[^|]*\|$/, '|');
+    return stripped.replace(/\x00/g, '\\|');
+  }).join('\n');
+}
+
 function scoreBadge(score: number, label = 'Tessl Review Score'): string {
   const color =
     score >= 80 ? 'brightgreen' : score >= 60 ? 'yellow' : score >= 40 ? 'orange' : 'red';
@@ -72,8 +90,8 @@ function formatComment(
       const afterBadge = scoreBadge(result.optimize.afterScore, 'after');
       body = ` ${beforeBadge} → ${afterBadge}\n\n`;
 
-      // Extract key improvements from the review suggestions column
-      const suggestions = extractSuggestions(result.output);
+      // Top 3 key improvements only — keeps the comment scannable
+      const suggestions = extractSuggestions(result.output).slice(0, 3);
       if (suggestions.length > 0) {
         body += `**Key improvements:**\n`;
         for (const s of suggestions) {
@@ -82,7 +100,10 @@ function formatComment(
         body += `\n`;
       }
 
-      body += `<details>\n<summary>Review Details</summary>\n\n${result.output}\n\n</details>\n\n`;
+      // Drop the Suggestion column from the table — its contents are already
+      // surfaced in Key improvements above
+      const reviewDetails = stripSuggestionColumn(result.output);
+      body += `<details>\n<summary>Review Details</summary>\n\n${reviewDetails}\n\n</details>\n\n`;
       body += `<details>\n<summary>View full optimized SKILL.md</summary>\n\n`;
       body += `${OPTIMIZE_START(result.skillPath)}\n`;
       body += `\`\`\`markdown\n${escapeForCodeFence(result.optimize.optimizedContent ?? '')}\n\`\`\`\n`;
