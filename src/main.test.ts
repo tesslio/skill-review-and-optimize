@@ -46,6 +46,7 @@ const { getChangedSkillFiles } = await import('./changed-files.ts');
 const { runSkillReview, runSkillOptimize, extractJson, parseOptimizeIterations } = await import('./skill-review.ts');
 const { postOrUpdateComment } = await import('./comment.ts');
 const { parseThreshold } = await import('./main.ts');
+const { parseRequestedPath } = await import('./apply.ts');
 
 // ---------------------------------------------------------------------------
 // 1. parseThreshold
@@ -716,6 +717,36 @@ describe('postOrUpdateComment', () => {
 // ---------------------------------------------------------------------------
 // 6. parseOptimizeIterations
 // ---------------------------------------------------------------------------
+
+describe('parseRequestedPath', () => {
+  test('returns undefined for bare /apply-optimize', () => {
+    expect(parseRequestedPath('/apply-optimize')).toBeUndefined();
+  });
+
+  test('returns the path when it ends with SKILL.md', () => {
+    expect(parseRequestedPath('/apply-optimize payments/SKILL.md'))
+      .toBe('payments/SKILL.md');
+  });
+
+  test('returns undefined for chatty comments without a SKILL.md path', () => {
+    expect(parseRequestedPath('/apply-optimize when you get a chance')).toBeUndefined();
+    expect(parseRequestedPath('Hey can you /apply-optimize for me?')).toBeUndefined();
+  });
+
+  test('handles tab-separated paths', () => {
+    expect(parseRequestedPath('/apply-optimize\tpayments/SKILL.md'))
+      .toBe('payments/SKILL.md');
+  });
+
+  test('finds the command anywhere in the body', () => {
+    expect(parseRequestedPath('Sure thing — /apply-optimize a/SKILL.md please'))
+      .toBe('a/SKILL.md');
+  });
+
+  test('returns undefined when path is on a different line than the command', () => {
+    expect(parseRequestedPath('/apply-optimize\npayments/SKILL.md')).toBeUndefined();
+  });
+});
 
 describe('parseOptimizeIterations', () => {
   test('returns 3 for undefined', () => {

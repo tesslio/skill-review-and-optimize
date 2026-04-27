@@ -16,6 +16,24 @@ function extractKeyImprovements(body: string): string[] {
   return [...section[1]!.matchAll(/^- (.+)$/gm)].map(m => m[1]!);
 }
 
+/**
+ * Parse the optional skill path from an `/apply-optimize` trigger comment.
+ *
+ * Returns the path only when the token after `/apply-optimize` actually looks
+ * like a SKILL.md path. This preserves the original "apply all" behavior for
+ * chatty comments like:
+ *
+ *   "Hey, can you /apply-optimize when you get a chance?"
+ *
+ * which the workflow's `contains(...)` filter will still trigger but should
+ * not be mistakenly read as `/apply-optimize when`.
+ */
+export function parseRequestedPath(commentBody: string): string | undefined {
+  const match = commentBody.match(/\/apply-optimize[ \t]+(\S+)/);
+  const candidate = match?.[1];
+  return candidate?.endsWith('SKILL.md') ? candidate : undefined;
+}
+
 function extractOptimizedContent(body: string): Map<string, string> {
   const results = new Map<string, string>();
   const regex = /<!-- tessl-optimized:(.+?) -->\n```markdown\n([\s\S]*?)\n```\n<!-- \/tessl-optimized:\1 -->/g;
@@ -131,9 +149,7 @@ async function apply(): Promise<void> {
   // Optional skill path argument: `/apply-optimize path/to/SKILL.md` applies
   // only that one. Bare `/apply-optimize` keeps the original "apply all" behavior.
   const triggerBody = (context.payload.comment?.body as string | undefined) ?? '';
-  // Match inline whitespace only (not \n) so the path is on the same line as the command
-  const pathMatch = triggerBody.match(/\/apply-optimize[ \t]+(\S+)/);
-  const requestedPath = pathMatch?.[1];
+  const requestedPath = parseRequestedPath(triggerBody);
 
   let toApply = optimized;
   if (requestedPath) {
