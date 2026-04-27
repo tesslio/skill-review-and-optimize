@@ -52,6 +52,8 @@ const {
   formatSuggestionBody,
   computeSuggestionHunks,
   encodeOptimizedAnchor,
+  parsePatchRanges,
+  filterHunksToPatchRanges,
 } = await import('./inline-suggestions.ts');
 
 // ---------------------------------------------------------------------------
@@ -920,6 +922,60 @@ describe('computeSuggestionHunks', () => {
     const optimized = 'a\nB\nc\nd\nE\nf\ng';
     const hunks = computeSuggestionHunks(original, optimized);
     expect(hunks).toHaveLength(2);
+  });
+});
+
+describe('parsePatchRanges', () => {
+  test('extracts new-side line ranges from a single hunk header', () => {
+    const patch = '@@ -10,3 +10,5 @@ ctx\n line\n+added\n+added\n line\n line';
+    expect(parsePatchRanges(patch)).toEqual([{ start: 10, end: 14 }]);
+  });
+
+  test('extracts ranges from multiple hunks', () => {
+    const patch = '@@ -1,1 +1,1 @@\n line\n@@ -10,2 +12,3 @@\n+a\n+b\n c';
+    expect(parsePatchRanges(patch)).toEqual([
+      { start: 1, end: 1 },
+      { start: 12, end: 14 },
+    ]);
+  });
+
+  test('treats omitted length as 1', () => {
+    const patch = '@@ -5 +5 @@\n+single';
+    expect(parsePatchRanges(patch)).toEqual([{ start: 5, end: 5 }]);
+  });
+
+  test('skips zero-length new ranges (pure deletions)', () => {
+    const patch = '@@ -10,2 +10,0 @@\n-removed\n-removed';
+    expect(parsePatchRanges(patch)).toEqual([]);
+  });
+
+  test('returns empty array for empty input', () => {
+    expect(parsePatchRanges('')).toEqual([]);
+  });
+});
+
+describe('filterHunksToPatchRanges', () => {
+  const hunks = [
+    { startLine: 5, endLine: 5, newContent: 'a' },
+    { startLine: 12, endLine: 14, newContent: 'b' },
+    { startLine: 20, endLine: 22, newContent: 'c' },
+  ];
+
+  test('keeps only hunks fully within a range', () => {
+    const ranges = [{ start: 1, end: 10 }, { start: 12, end: 20 }];
+    const filtered = filterHunksToPatchRanges(hunks, ranges);
+    expect(filtered.map((h) => h.newContent)).toEqual(['a', 'b']);
+  });
+
+  test('drops hunks that straddle a range boundary', () => {
+    const ranges = [{ start: 1, end: 13 }];
+    const filtered = filterHunksToPatchRanges(hunks, ranges);
+    // hunk 12-14 is not fully within 1-13 → dropped
+    expect(filtered.map((h) => h.newContent)).toEqual(['a']);
+  });
+
+  test('returns empty when no ranges are supplied', () => {
+    expect(filterHunksToPatchRanges(hunks, [])).toEqual([]);
   });
 });
 

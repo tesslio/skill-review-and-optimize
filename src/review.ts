@@ -2,7 +2,9 @@ import * as github from '@actions/github';
 import {
   REVIEW_COMMENT_MARKER,
   computeSuggestionHunks,
+  filterHunksToPatchRanges,
   formatSuggestionBody,
+  parsePatchRanges,
 } from './inline-suggestions.ts';
 import type { SkillReviewResult } from './skill-review.ts';
 
@@ -85,6 +87,26 @@ export async function postInlineSuggestions(
 
   await deletePriorSuggestions(octokit, owner, repo, prNumber);
 
+  // Fetch the PR's file list once so we can scope inline suggestions to
+  // lines that GitHub considers part of the diff. Suggestions on unchanged
+  // lines are rejected with "Line could not be resolved".
+  const prFiles = new Map<string, string>();
+  let filesPage = 1;
+  while (true) {
+    const { data } = await octokit.rest.pulls.listFiles({
+      owner,
+      repo,
+      pull_number: prNumber,
+      per_page: 100,
+      page: filesPage,
+    });
+    for (const f of data) {
+      if (f.patch) prFiles.set(f.filename, f.patch);
+    }
+    if (data.length < 100) break;
+    filesPage++;
+  }
+
   for (const result of results) {
     const optimizedContent = result.optimize?.optimizedContent;
     if (!result.optimize?.optimized || !optimizedContent) continue;
@@ -92,8 +114,20 @@ export async function postInlineSuggestions(
     // The action restores the original file after optimize, so reading from
     // disk gives us the user's PR-head version that GitHub's diff view sees.
     const original = await Bun.file(result.skillPath).text();
-    const hunks = computeSuggestionHunks(original, optimizedContent);
-    if (hunks.length === 0) continue;
+    const allHunks = computeSuggestionHunks(original, optimizedContent);
+    if (allHunks.length === 0) continue;
+
+    // Drop hunks targeting lines outside the PR diff — GitHub would reject
+    // them and the whole batched review with them.
+    const patch = prFiles.get(result.skillPath) ?? '';
+    const ranges = parsePatchRanges(patch);
+    const hunks = filterHunksToPatchRanges(allHunks, ranges);
+    if (hunks.length === 0) {
+      console.log(
+        `${result.skillPath}: ${allHunks.length} optimizer hunk(s) all fall outside the PR diff. Skipping inline suggestions for this file.`,
+      );
+      continue;
+    }
 
     const comments = hunks.map((hunk) => {
       const base = {

@@ -41,6 +41,52 @@ export function formatSuggestionBody(newContent: string, intro?: string): string
 }
 
 /**
+ * A line range in a file (1-based, inclusive on both ends).
+ */
+export interface LineRange {
+  start: number;
+  end: number;
+}
+
+/**
+ * Parse the unified-diff `patch` field returned by `pulls.listFiles` into the
+ * set of line ranges in the *new* (PR-head) version of the file. GitHub only
+ * lets you anchor a review comment to lines that are part of the diff, so we
+ * use these ranges to filter our suggestion hunks before posting.
+ *
+ * Each hunk header `@@ -A,B +C,D @@` covers new lines `[C, C+D-1]`.
+ */
+export function parsePatchRanges(patch: string): LineRange[] {
+  const ranges: LineRange[] = [];
+  const headerRegex = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm;
+  let match: RegExpExecArray | null;
+  while ((match = headerRegex.exec(patch)) !== null) {
+    const start = Number(match[1]);
+    const length = match[2] ? Number(match[2]) : 1;
+    if (length > 0) {
+      ranges.push({ start, end: start + length - 1 });
+    }
+  }
+  return ranges;
+}
+
+/**
+ * Keep only suggestion hunks whose anchor range is fully covered by the PR's
+ * patch ranges. Hunks targeting unchanged regions of the file are dropped
+ * because GitHub rejects review comments on those lines with
+ * "Line could not be resolved".
+ */
+export function filterHunksToPatchRanges(
+  hunks: SuggestionHunk[],
+  ranges: LineRange[],
+): SuggestionHunk[] {
+  if (ranges.length === 0) return [];
+  return hunks.filter((h) =>
+    ranges.some((r) => h.startLine >= r.start && h.endLine <= r.end),
+  );
+}
+
+/**
  * Encode the optimized SKILL.md as a single-line hidden HTML comment that
  * `/apply-optimize` can extract from the issue summary. Base64 sidesteps any
  * escaping concerns around backticks, dashes, and nested HTML in the content.
