@@ -49,6 +49,7 @@ function formatComment(
   threshold: number,
   optimizeContext?: OptimizeContext,
 ): string {
+  const optimizedCount = results.filter((r) => r.optimize?.optimized).length;
   const sections = results.map((result) => {
     const emoji =
       result.error
@@ -87,7 +88,11 @@ function formatComment(
       body += `\`\`\`markdown\n${escapeForCodeFence(result.optimize.optimizedContent ?? '')}\n\`\`\`\n`;
       body += `${OPTIMIZE_END(result.skillPath)}\n`;
       body += `\n</details>\n`;
-      body += `\nComment \`/apply-optimize\` to apply this change directly to the PR.\n`;
+      if (optimizedCount > 1) {
+        body += `\nComment \`/apply-optimize ${result.skillPath}\` to apply this skill, or \`/apply-optimize\` to apply all.\n`;
+      } else {
+        body += `\nComment \`/apply-optimize\` to apply this change directly to the PR.\n`;
+      }
     } else if (result.optimize && !result.optimize.optimized && !result.optimize.error) {
       // Optimize ran but no changes needed
       const badge = result.score >= 0 ? ` ${scoreBadge(result.score)}${emoji}` : '';

@@ -579,6 +579,56 @@ describe('postOrUpdateComment', () => {
     expect(body).toContain('Improved content');
   });
 
+  test('single optimized skill shows bare /apply-optimize CTA', async () => {
+    listCommentsMock.mockResolvedValueOnce({ data: [] });
+
+    await postOrUpdateComment(
+      [{
+        skillPath: 'skills/only/SKILL.md',
+        passed: true,
+        score: 60,
+        output: 'review output',
+        optimize: {
+          optimized: true,
+          beforeScore: 60,
+          afterScore: 90,
+          optimizedContent: 'Improved',
+        },
+      }],
+      0,
+    );
+
+    const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+    const body = callArgs.body as string;
+    expect(body).toContain('Comment `/apply-optimize` to apply this change');
+    expect(body).not.toContain('/apply-optimize skills/only/SKILL.md');
+  });
+
+  test('multiple optimized skills show per-skill /apply-optimize CTA', async () => {
+    listCommentsMock.mockResolvedValueOnce({ data: [] });
+
+    const optimize = (before: number, after: number) => ({
+      optimized: true,
+      beforeScore: before,
+      afterScore: after,
+      optimizedContent: 'Improved',
+    });
+
+    await postOrUpdateComment(
+      [
+        { skillPath: 'skills/a/SKILL.md', passed: true, score: 60, output: 'a', optimize: optimize(60, 90) },
+        { skillPath: 'skills/b/SKILL.md', passed: true, score: 50, output: 'b', optimize: optimize(50, 85) },
+      ],
+      0,
+    );
+
+    const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+    const body = callArgs.body as string;
+    expect(body).toContain('`/apply-optimize skills/a/SKILL.md`');
+    expect(body).toContain('`/apply-optimize skills/b/SKILL.md`');
+    expect(body).toContain('or `/apply-optimize` to apply all');
+  });
+
   test('comment shows no optimization needed', async () => {
     listCommentsMock.mockResolvedValueOnce({ data: [] });
 

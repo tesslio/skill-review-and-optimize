@@ -128,11 +128,35 @@ async function apply(): Promise<void> {
     return;
   }
 
-  console.log(`Found ${optimized.size} optimized file(s): ${[...optimized.keys()].join(', ')}`);
+  // Optional skill path argument: `/apply-optimize path/to/SKILL.md` applies
+  // only that one. Bare `/apply-optimize` keeps the original "apply all" behavior.
+  const triggerBody = (context.payload.comment?.body as string | undefined) ?? '';
+  // Match inline whitespace only (not \n) so the path is on the same line as the command
+  const pathMatch = triggerBody.match(/\/apply-optimize[ \t]+(\S+)/);
+  const requestedPath = pathMatch?.[1];
+
+  let toApply = optimized;
+  if (requestedPath) {
+    if (!optimized.has(requestedPath)) {
+      const available = [...optimized.keys()]
+        .map((k) => `\`/apply-optimize ${k}\``)
+        .join('\n- ');
+      await postReply(
+        octokit,
+        context,
+        prNumber,
+        `⚠️ No optimization found for \`${requestedPath}\`.\n\nAvailable:\n- ${available}\n\nOr run \`/apply-optimize\` to apply all.`,
+      );
+      return;
+    }
+    toApply = new Map([[requestedPath, optimized.get(requestedPath)!]]);
+  }
+
+  console.log(`Applying ${toApply.size} of ${optimized.size} optimized file(s): ${[...toApply.keys()].join(', ')}`);
 
   // Write each optimized file (validate paths to prevent traversal)
   const cwd = process.cwd();
-  for (const [filePath, content] of optimized) {
+  for (const [filePath, content] of toApply) {
     const resolved = path.resolve(cwd, filePath);
     if (!resolved.startsWith(cwd)) {
       throw new Error(`Path traversal detected: ${filePath}`);
@@ -149,7 +173,7 @@ async function apply(): Promise<void> {
   Bun.spawnSync(['git', 'config', 'user.email', 'skill-review[bot]@users.noreply.github.com']);
 
   // Commit and push
-  const gitAdd = Bun.spawnSync(['git', 'add', ...optimized.keys()]);
+  const gitAdd = Bun.spawnSync(['git', 'add', ...toApply.keys()]);
   if (gitAdd.exitCode !== 0) {
     throw new Error(`git add failed: ${gitAdd.stderr.toString()}`);
   }
@@ -180,7 +204,7 @@ async function apply(): Promise<void> {
   console.log('Optimization applied and pushed successfully.');
 
   // Post confirmation comment with key improvements summary
-  const files = [...optimized.keys()].map(f => `\`${f}\``).join(', ');
+  const files = [...toApply.keys()].map(f => `\`${f}\``).join(', ');
   const improvements = extractKeyImprovements(botComment.body);
   let confirmBody = `✅ Applied optimized ${files} (${commitSha}).`;
   if (improvements.length > 0) {

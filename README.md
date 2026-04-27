@@ -68,6 +68,14 @@ jobs:
 
 When a user comments `/apply-optimize` on a PR that has a Tessl review comment with optimization suggestions, this workflow extracts the optimized content and commits it directly to the PR branch.
 
+When a PR has more than one optimized skill, you can apply just one of them by including the path:
+
+```
+/apply-optimize path/to/SKILL.md
+```
+
+The review comment shows the exact command to copy for each skill. Bare `/apply-optimize` still applies all optimized skills at once.
+
 #### Getting a TESSL_API_TOKEN
 
 1. Sign up or log in at [tessl.io](https://tessl.io)
