@@ -113,7 +113,8 @@ function formatComment(
 
       if (optimizeContext?.inlineSuggestionsEnabled) {
         const filesUrl = pullRequestFilesUrl();
-        body += `💡 _Inline suggestions posted on the file diff — click "Commit suggestion" to accept, or "Resolve" to dismiss. See the [Files changed](${filesUrl}) tab._\n\n`;
+        body += `### 👉 [Review suggestions on the Files changed tab](${filesUrl})\n\n`;
+        body += `Each change is posted as a GitHub suggestion — click **Commit suggestion** to accept, **Resolve** to dismiss, or batch several with **Add suggestion to batch**. Comment \`/apply-optimize\` to accept everything at once.\n\n`;
       }
 
       // Show the unified diff between the user's PR-head version and the
