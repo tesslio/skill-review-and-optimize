@@ -47,6 +47,14 @@ const { runSkillReview, runSkillOptimize, extractJson, parseOptimizeIterations }
 const { postOrUpdateComment } = await import('./comment.ts');
 const { parseThreshold } = await import('./main.ts');
 const { parseRequestedPath } = await import('./apply.ts');
+const {
+  pickFenceLength,
+  formatSuggestionBody,
+  computeSuggestionHunks,
+  encodeOptimizedAnchor,
+  parsePatchRanges,
+  filterHunksToPatchRanges,
+} = await import('./inline-suggestions.ts');
 
 // ---------------------------------------------------------------------------
 // 1. parseThreshold
@@ -553,7 +561,7 @@ describe('postOrUpdateComment', () => {
     expect(body).toContain('suggest an optimized version automatically');
   });
 
-  test('comment shows before/after badges when optimized', async () => {
+  test('comment shows score badges and opportunity sentence when optimized', async () => {
     listCommentsMock.mockResolvedValueOnce({ data: [] });
 
     await postOrUpdateComment(
@@ -566,6 +574,7 @@ describe('postOrUpdateComment', () => {
           optimized: true,
           beforeScore: 60,
           afterScore: 90,
+          originalContent: '---\nname: test\n---\nOriginal content',
           optimizedContent: '---\nname: test\n---\nImproved content',
         },
       }],
@@ -574,10 +583,21 @@ describe('postOrUpdateComment', () => {
 
     const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     const body = callArgs.body as string;
+    // Score badges (visual)
     expect(body).toContain('before-60%25');
     expect(body).toContain('after-90%25');
-    expect(body).toContain('View full optimized SKILL.md');
-    expect(body).toContain('Improved content');
+    // Opportunity sentence (textual)
+    expect(body).toContain('opportunity to take this skill from 60% to 90%');
+    expect(body).toContain('Have a look at the suggestions');
+    // Review details collapsed
+    expect(body).toContain('Review Details');
+    // No removed sections
+    expect(body).not.toContain('Key improvements');
+    expect(body).not.toContain('View all changes (diff)');
+    // No em-dashes in our copy
+    expect(body).not.toContain(' — ');
+    // Hidden anchor for /apply-optimize
+    expect(body).toMatch(/<!--tessl-optimized-b64:a\/SKILL\.md:[A-Za-z0-9+/=]+-->/);
   });
 
   test('single optimized skill shows bare /apply-optimize CTA', async () => {
@@ -630,10 +650,9 @@ describe('postOrUpdateComment', () => {
     expect(body).toContain('or `/apply-optimize` to apply all');
   });
 
-  test('optimize comment caps key improvements at 3 and strips Suggestion column', async () => {
+  test('optimize comment keeps the full Suggestion column in the review table', async () => {
     listCommentsMock.mockResolvedValueOnce({ data: [] });
 
-    // Mock review output with 4 dimensions (= 4 suggestions) — should cap at 3
     const reviewOutput = [
       '### Review Details',
       '',
@@ -641,8 +660,6 @@ describe('postOrUpdateComment', () => {
       '|-----------|-------|--------|------------|',
       '| **conciseness** | ██░ 2/3 | verbose detail | suggestion one |',
       '| **actionability** | █░░ 1/3 | vague detail | suggestion two |',
-      '| **clarity** | ██░ 2/3 | unclear detail | suggestion three |',
-      '| **structure** | ██░ 2/3 | flat detail | suggestion four |',
     ].join('\n');
 
     await postOrUpdateComment(
@@ -664,16 +681,14 @@ describe('postOrUpdateComment', () => {
     const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     const body = callArgs.body as string;
 
-    // Top 3 only in Key improvements
-    expect(body).toContain('- suggestion one');
-    expect(body).toContain('- suggestion two');
-    expect(body).toContain('- suggestion three');
-    expect(body).not.toContain('- suggestion four');
+    // Suggestion column is intact in the review-details table
+    expect(body).toContain('| Suggestion |');
+    expect(body).toContain('| suggestion one |');
+    expect(body).toContain('| suggestion two |');
 
-    // Suggestion column dropped from the table (header + data rows)
-    expect(body).not.toContain('| Suggestion |');
-    expect(body).toContain('| Dimension | Score | Detail |');
-    expect(body).not.toMatch(/\| suggestion (one|two|three|four) \|/);
+    // No standalone "Key improvements" bullet section above the table
+    expect(body).not.toContain('Key improvements');
+    expect(body).not.toContain('- suggestion one');
   });
 
   test('comment shows no optimization needed', async () => {
@@ -779,6 +794,208 @@ describe('parseOptimizeIterations', () => {
 // ---------------------------------------------------------------------------
 // 7. runSkillOptimize
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// 8. inline-suggestions: pickFenceLength, formatSuggestionBody, computeSuggestionHunks
+// ---------------------------------------------------------------------------
+
+describe('pickFenceLength', () => {
+  test('returns 3 for plain content with no backticks', () => {
+    expect(pickFenceLength('plain content')).toBe(3);
+  });
+
+  test('returns 3 for content with inline backticks (single)', () => {
+    expect(pickFenceLength('use `foo` for inline code')).toBe(3);
+  });
+
+  test('returns 4 when content contains a 3-backtick fence', () => {
+    const content = 'before\n```\ncode\n```\nafter';
+    expect(pickFenceLength(content)).toBe(4);
+  });
+
+  test('returns 5 when content contains a 4-backtick fence', () => {
+    const content = 'before\n````\ncode\n````\nafter';
+    expect(pickFenceLength(content)).toBe(5);
+  });
+
+  test('returns max+1 when multiple fence lengths are mixed', () => {
+    const content = '```\nshort\n```\n````\nlonger\n````';
+    expect(pickFenceLength(content)).toBe(5);
+  });
+});
+
+describe('formatSuggestionBody', () => {
+  test('wraps plain content in a 3-backtick suggestion fence', () => {
+    const result = formatSuggestionBody('hello world');
+    expect(result).toBe('```suggestion\nhello world\n```');
+  });
+
+  test('uses longer fence when content has nested backticks', () => {
+    const content = '```\ncode\n```';
+    const result = formatSuggestionBody(content);
+    expect(result.startsWith('````suggestion\n')).toBe(true);
+    expect(result.endsWith('\n````')).toBe(true);
+    expect(result).toContain(content);
+  });
+
+  test('includes intro text above the suggestion block', () => {
+    const result = formatSuggestionBody('new', 'Consider this:');
+    expect(result.startsWith('Consider this:\n\n```suggestion\n')).toBe(true);
+  });
+
+  test('handles empty content (pure deletion)', () => {
+    expect(formatSuggestionBody('')).toBe('```suggestion\n\n```');
+  });
+});
+
+describe('computeSuggestionHunks', () => {
+  test('returns no hunks when content is identical', () => {
+    expect(computeSuggestionHunks('a\nb\nc', 'a\nb\nc')).toEqual([]);
+  });
+
+  test('detects a single-line modification', () => {
+    const original = 'line one\nline two\nline three';
+    const optimized = 'line one\nLINE TWO\nline three';
+    const hunks = computeSuggestionHunks(original, optimized);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]?.startLine).toBe(2);
+    expect(hunks[0]?.endLine).toBe(2);
+    expect(hunks[0]?.newContent).toBe('LINE TWO');
+  });
+
+  test('detects a multi-line modification', () => {
+    const original = 'a\nb\nc\nd\ne';
+    const optimized = 'a\nB1\nB2\nC1\nd\ne';
+    const hunks = computeSuggestionHunks(original, optimized);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]?.startLine).toBe(2);
+    expect(hunks[0]?.endLine).toBe(3);
+    expect(hunks[0]?.newContent).toBe('B1\nB2\nC1');
+  });
+
+  test('detects a pure deletion (empty newContent)', () => {
+    const original = 'keep\nremove me\nkeep';
+    const optimized = 'keep\nkeep';
+    const hunks = computeSuggestionHunks(original, optimized);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]?.newContent).toBe('');
+  });
+
+  test('detects a pure insertion (anchored to preceding line)', () => {
+    const original = 'a\nc';
+    const optimized = 'a\nb\nc';
+    const hunks = computeSuggestionHunks(original, optimized);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]?.startLine).toBe(hunks[0]?.endLine);
+    // Mid-file insertion: anchor line "a" first, then "b"
+    expect(hunks[0]?.newContent).toBe('a\nb');
+  });
+
+  test('top-of-file insertion places new content before line 1', () => {
+    const original = 'second\nthird';
+    const optimized = 'first\nsecond\nthird';
+    const hunks = computeSuggestionHunks(original, optimized);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]?.startLine).toBe(1);
+    expect(hunks[0]?.endLine).toBe(1);
+    // Inserted content must come *before* the original line 1
+    expect(hunks[0]?.newContent).toBe('first\nsecond');
+  });
+
+  test('CRLF line endings do not produce false-positive hunks', () => {
+    const originalCrlf = 'line one\r\nline two\r\nline three';
+    const optimizedLf = 'line one\nline two\nline three';
+    expect(computeSuggestionHunks(originalCrlf, optimizedLf)).toEqual([]);
+  });
+
+  test('CRLF input strips \\r from suggestion bodies', () => {
+    const originalCrlf = 'line one\r\nline two\r\nline three';
+    const optimizedCrlf = 'line one\r\nLINE TWO\r\nline three';
+    const hunks = computeSuggestionHunks(originalCrlf, optimizedCrlf);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]?.newContent).toBe('LINE TWO');
+    expect(hunks[0]?.newContent).not.toContain('\r');
+  });
+
+  test('produces multiple hunks for non-contiguous changes', () => {
+    const original = 'a\nb\nc\nd\ne\nf\ng';
+    const optimized = 'a\nB\nc\nd\nE\nf\ng';
+    const hunks = computeSuggestionHunks(original, optimized);
+    expect(hunks).toHaveLength(2);
+  });
+});
+
+describe('parsePatchRanges', () => {
+  test('extracts new-side line ranges from a single hunk header', () => {
+    const patch = '@@ -10,3 +10,5 @@ ctx\n line\n+added\n+added\n line\n line';
+    expect(parsePatchRanges(patch)).toEqual([{ start: 10, end: 14 }]);
+  });
+
+  test('extracts ranges from multiple hunks', () => {
+    const patch = '@@ -1,1 +1,1 @@\n line\n@@ -10,2 +12,3 @@\n+a\n+b\n c';
+    expect(parsePatchRanges(patch)).toEqual([
+      { start: 1, end: 1 },
+      { start: 12, end: 14 },
+    ]);
+  });
+
+  test('treats omitted length as 1', () => {
+    const patch = '@@ -5 +5 @@\n+single';
+    expect(parsePatchRanges(patch)).toEqual([{ start: 5, end: 5 }]);
+  });
+
+  test('skips zero-length new ranges (pure deletions)', () => {
+    const patch = '@@ -10,2 +10,0 @@\n-removed\n-removed';
+    expect(parsePatchRanges(patch)).toEqual([]);
+  });
+
+  test('returns empty array for empty input', () => {
+    expect(parsePatchRanges('')).toEqual([]);
+  });
+});
+
+describe('filterHunksToPatchRanges', () => {
+  const hunks = [
+    { startLine: 5, endLine: 5, newContent: 'a' },
+    { startLine: 12, endLine: 14, newContent: 'b' },
+    { startLine: 20, endLine: 22, newContent: 'c' },
+  ];
+
+  test('keeps only hunks fully within a range', () => {
+    const ranges = [{ start: 1, end: 10 }, { start: 12, end: 20 }];
+    const filtered = filterHunksToPatchRanges(hunks, ranges);
+    expect(filtered.map((h) => h.newContent)).toEqual(['a', 'b']);
+  });
+
+  test('drops hunks that straddle a range boundary', () => {
+    const ranges = [{ start: 1, end: 13 }];
+    const filtered = filterHunksToPatchRanges(hunks, ranges);
+    // hunk 12-14 is not fully within 1-13 → dropped
+    expect(filtered.map((h) => h.newContent)).toEqual(['a']);
+  });
+
+  test('returns empty when no ranges are supplied', () => {
+    expect(filterHunksToPatchRanges(hunks, [])).toEqual([]);
+  });
+});
+
+describe('encodeOptimizedAnchor', () => {
+  test('produces a single-line HTML comment with base64-encoded content', () => {
+    const anchor = encodeOptimizedAnchor('foo/SKILL.md', 'hello world');
+    expect(anchor).toMatch(/^<!--tessl-optimized-b64:foo\/SKILL\.md:[A-Za-z0-9+/=]+-->$/);
+    // No literal newlines so it stays a single line in the comment
+    expect(anchor).not.toContain('\n');
+  });
+
+  test('round-trips arbitrary markdown content via base64', () => {
+    const content = '---\nname: x\n---\n# Heading\n\n```ts\nconst y = 1;\n```\n';
+    const anchor = encodeOptimizedAnchor('skills/x/SKILL.md', content);
+    const match = anchor.match(/<!--tessl-optimized-b64:.+?:([A-Za-z0-9+/=]+)-->/);
+    expect(match).not.toBeNull();
+    const decoded = Buffer.from(match![1]!, 'base64').toString('utf-8');
+    expect(decoded).toBe(content);
+  });
+});
 
 describe('runSkillOptimize', () => {
   let originalSpawn: typeof Bun.spawn;

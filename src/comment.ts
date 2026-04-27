@@ -1,9 +1,8 @@
 import * as github from '@actions/github';
 import type { SkillReviewResult } from './skill-review.ts';
+import { encodeOptimizedAnchor } from './inline-suggestions.ts';
 
 export const COMMENT_MARKER = '<!-- tessl-skill-review -->';
-const OPTIMIZE_START = (path: string) => `<!-- tessl-optimized:${path} -->`;
-const OPTIMIZE_END = (path: string) => `<!-- /tessl-optimized:${path} -->`;
 
 /** Escape text for safe inclusion in markdown code fences */
 function escapeForCodeFence(text: string): string {
@@ -17,37 +16,10 @@ function escapeMarkdown(text: string): string {
 
 const TESSL_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 21 24"><path fill="%23f8f8f8" d="M5.8 10.47c0-.21.22-.35.4-.24l3.75 2.2v4.95c0 .87.92 1.4 1.65.96l3.6-2.17v5.41l-3.6 2.12c-.69.4-1.52.4-2.2 0l-3.6-2.12zM21 16.9c0 .8-.42 1.53-1.1 1.93l-3.6 2.12V15.5l4.7-2.85zM4.7 15.4v5.53l-3.6-2.12A2.2 2.2 0 0 1 0 16.89v-4.24zM19.9 5.19c.68.4 1.1 1.13 1.1 1.93v4.23l-9.54 5.79c-.19.1-.42-.03-.42-.24v-4.46l4.57-2.7a.84.84 0 0 0 0-1.44l-4.07-2.44 4.75-2.8zm-5.65 3.59c.19.1.19.38 0 .48l-3.75 2.2-4.56-2.68a.82.82 0 0 0-1.24.73v4.61L0 11.36V7.12c0-.8.42-1.54 1.1-1.93l3.6-2.13zM9.4.3c.68-.4 1.51-.4 2.2 0l3.6 2.12-4.75 2.79L5.8 2.42z"/></svg>`;
 
-/** Extract suggestion texts from the review table markdown */
-function extractSuggestions(output: string): string[] {
-  const results: string[] = [];
-  // Match table rows: | **dimension** | score | detail | suggestion |
-  const rowRegex = /^\| \*\*.+?\*\* \|.+?\|.+?\| (.+?) \|$/gm;
-  let match: RegExpExecArray | null;
-  while ((match = rowRegex.exec(output)) !== null) {
-    const suggestion = match[1]!.replace(/\\(\|)/g, '$1').trim();
-    if (suggestion && suggestion !== '—') {
-      results.push(suggestion);
-    }
-  }
-  return results;
-}
-
-/**
- * Drop the last column from any 4-column markdown table in the text. Used to
- * remove the "Suggestion" column from the review-details table when its
- * contents are already shown in the "Key improvements" section above —
- * avoiding duplication and tightening the comment.
- */
-function stripSuggestionColumn(text: string): string {
-  return text.split('\n').map((line) => {
-    // Protect escaped pipes inside cells before counting separators
-    const protectedLine = line.replace(/\\\|/g, '\x00');
-    const pipeCount = (protectedLine.match(/\|/g) ?? []).length;
-    // 4-column row has exactly 5 unescaped pipes (start, 3 separators, end)
-    if (pipeCount !== 5) return line;
-    const stripped = protectedLine.replace(/\|[^|]*\|$/, '|');
-    return stripped.replace(/\x00/g, '\\|');
-  }).join('\n');
+function pullRequestFilesUrl(): string {
+  const ctx = github.context;
+  const prNumber = ctx.payload.pull_request?.number;
+  return `https://github.com/${ctx.repo.owner}/${ctx.repo.repo}/pull/${prNumber}/files`;
 }
 
 function scoreBadge(score: number, label = 'Tessl Review Score'): string {
@@ -60,6 +32,7 @@ function scoreBadge(score: number, label = 'Tessl Review Score'): string {
 
 export interface OptimizeContext {
   skipped: boolean;
+  inlineSuggestionsEnabled?: boolean;
 }
 
 function formatComment(
@@ -85,35 +58,33 @@ function formatComment(
         body += `\n<details>\n<summary>Output</summary>\n\n\`\`\`\n${escapeForCodeFence(result.output)}\n\`\`\`\n\n</details>\n`;
       }
     } else if (result.optimize?.optimized) {
-      // Before/after badges
-      const beforeBadge = scoreBadge(result.optimize.beforeScore, 'before');
-      const afterBadge = scoreBadge(result.optimize.afterScore, 'after');
-      body = ` ${beforeBadge} → ${afterBadge}\n\n`;
+      const before = result.optimize.beforeScore;
+      const after = result.optimize.afterScore;
+      const beforeBadge = scoreBadge(before, 'before');
+      const afterBadge = scoreBadge(after, 'after');
+      body = `${beforeBadge} → ${afterBadge}\n\n`;
+      body += `🎯 **An opportunity to take this skill from ${before}% to ${after}%.** Have a look at the suggestions below.\n\n`;
 
-      // Top 3 key improvements only — keeps the comment scannable
-      const suggestions = extractSuggestions(result.output).slice(0, 3);
-      if (suggestions.length > 0) {
-        body += `**Key improvements:**\n`;
-        for (const s of suggestions) {
-          body += `- ${s}\n`;
+      // Single source of truth for per-dimension feedback: the review table
+      // (with the Suggestion column intact).
+      body += `<details>\n<summary>Review Details</summary>\n\n${result.output}\n\n</details>\n\n`;
+
+      if (optimizeContext?.inlineSuggestionsEnabled) {
+        const filesUrl = pullRequestFilesUrl();
+        body += `### 👉 [Review suggestions on the Files changed tab](${filesUrl})\n\n`;
+        body += `Accept individually with **Commit suggestion**, batch several with **Add suggestion to batch**, or comment \`/apply-optimize\` to accept all.\n`;
+        if (optimizedCount > 1) {
+          body += `\nOr comment \`/apply-optimize ${result.skillPath}\` to apply just this skill.\n`;
         }
-        body += `\n`;
+      } else if (optimizedCount > 1) {
+        body += `Comment \`/apply-optimize ${result.skillPath}\` to apply this skill, or \`/apply-optimize\` to apply all.\n`;
+      } else {
+        body += `Comment \`/apply-optimize\` to apply this change directly to the PR.\n`;
       }
 
-      // Drop the Suggestion column from the table — its contents are already
-      // surfaced in Key improvements above
-      const reviewDetails = stripSuggestionColumn(result.output);
-      body += `<details>\n<summary>Review Details</summary>\n\n${reviewDetails}\n\n</details>\n\n`;
-      body += `<details>\n<summary>View full optimized SKILL.md</summary>\n\n`;
-      body += `${OPTIMIZE_START(result.skillPath)}\n`;
-      body += `\`\`\`markdown\n${escapeForCodeFence(result.optimize.optimizedContent ?? '')}\n\`\`\`\n`;
-      body += `${OPTIMIZE_END(result.skillPath)}\n`;
-      body += `\n</details>\n`;
-      if (optimizedCount > 1) {
-        body += `\nComment \`/apply-optimize ${result.skillPath}\` to apply this skill, or \`/apply-optimize\` to apply all.\n`;
-      } else {
-        body += `\nComment \`/apply-optimize\` to apply this change directly to the PR.\n`;
-      }
+      // Hidden anchor so /apply-optimize can still extract the full optimized
+      // content from the comment body without cluttering the rendered view.
+      body += `\n${encodeOptimizedAnchor(result.skillPath, result.optimize.optimizedContent ?? '')}\n`;
     } else if (result.optimize && !result.optimize.optimized && !result.optimize.error) {
       // Optimize ran but no changes needed
       const badge = result.score >= 0 ? ` ${scoreBadge(result.score)}${emoji}` : '';

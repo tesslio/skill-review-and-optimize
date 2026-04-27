@@ -52,7 +52,8 @@ jobs:
   apply:
     if: >
       github.event.issue.pull_request &&
-      contains(github.event.comment.body, '/apply-optimize')
+      contains(github.event.comment.body, '/apply-optimize') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -66,7 +67,9 @@ jobs:
           mode: apply
 ```
 
-When a user comments `/apply-optimize` on a PR that has a Tessl review comment with optimization suggestions, this workflow extracts the optimized content and commits it directly to the PR branch.
+When a repo collaborator comments `/apply-optimize` on a PR that has a Tessl review comment with optimization suggestions, this workflow extracts the optimized content and commits it directly to the PR branch.
+
+> **Security:** the `author_association` filter restricts `/apply-optimize` to repo collaborators. The action also enforces this at runtime as defense in depth, so a missing or relaxed filter cannot let an arbitrary commenter trigger commits to your PR branch.
 
 When a PR has more than one optimized skill, you can apply just one of them by including the path:
 
@@ -94,7 +97,20 @@ No CLI install or workspace setup required.
 | `fail-threshold` | Minimum score (0-100) to pass. Set to `0` to never fail. | `0` |
 | `optimize` | Run skill optimization after review (requires `tessl-token`) | `false` |
 | `optimize-iterations` | Max optimization iterations (1-10) | `3` |
+| `inline-suggestions` | Post optimization changes as inline GitHub `suggestion` blocks on the PR diff (cherry-pick individual changes) | `false` |
 | `tessl-token` | Tessl API token for optimize mode | _(optional)_ |
+
+### Cherry-picking individual changes (inline suggestions)
+
+```yaml
+- uses: tesslio/skill-review-and-optimize@bff9490027d60847df6494fdac7dccfb3ad82948
+  with:
+    optimize: true
+    inline-suggestions: true
+    tessl-token: ${{ secrets.TESSL_API_TOKEN }}
+```
+
+When `inline-suggestions: true`, each diff hunk between the user's `SKILL.md` and the optimizer's version is posted as a GitHub native `suggestion` block on the file diff. Authors can click "Commit suggestion" on individual hunks to accept changes one at a time, alongside (or instead of) the all-at-once `/apply-optimize` flow.
 
 ### Setting a quality gate
 
