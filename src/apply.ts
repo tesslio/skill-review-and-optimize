@@ -16,6 +16,24 @@ function extractKeyImprovements(body: string): string[] {
   return [...section[1]!.matchAll(/^- (.+)$/gm)].map(m => m[1]!);
 }
 
+/**
+ * Parse the optional skill path from an `/apply-optimize` trigger comment.
+ *
+ * Returns the path only when the token after `/apply-optimize` actually looks
+ * like a SKILL.md path. This preserves the original "apply all" behavior for
+ * chatty comments like:
+ *
+ *   "Hey, can you /apply-optimize when you get a chance?"
+ *
+ * which the workflow's `contains(...)` filter will still trigger but should
+ * not be mistakenly read as `/apply-optimize when`.
+ */
+export function parseRequestedPath(commentBody: string): string | undefined {
+  const match = commentBody.match(/\/apply-optimize[ \t]+(\S+)/);
+  const candidate = match?.[1];
+  return candidate?.endsWith('SKILL.md') ? candidate : undefined;
+}
+
 function extractOptimizedContent(body: string): Map<string, string> {
   const results = new Map<string, string>();
   const regex = /<!-- tessl-optimized:(.+?) -->\n```markdown\n([\s\S]*?)\n```\n<!-- \/tessl-optimized:\1 -->/g;
@@ -128,11 +146,33 @@ async function apply(): Promise<void> {
     return;
   }
 
-  console.log(`Found ${optimized.size} optimized file(s): ${[...optimized.keys()].join(', ')}`);
+  // Optional skill path argument: `/apply-optimize path/to/SKILL.md` applies
+  // only that one. Bare `/apply-optimize` keeps the original "apply all" behavior.
+  const triggerBody = (context.payload.comment?.body as string | undefined) ?? '';
+  const requestedPath = parseRequestedPath(triggerBody);
+
+  let toApply = optimized;
+  if (requestedPath) {
+    if (!optimized.has(requestedPath)) {
+      const available = [...optimized.keys()]
+        .map((k) => `\`/apply-optimize ${k}\``)
+        .join('\n- ');
+      await postReply(
+        octokit,
+        context,
+        prNumber,
+        `⚠️ No optimization found for \`${requestedPath}\`.\n\nAvailable:\n- ${available}\n\nOr run \`/apply-optimize\` to apply all.`,
+      );
+      return;
+    }
+    toApply = new Map([[requestedPath, optimized.get(requestedPath)!]]);
+  }
+
+  console.log(`Applying ${toApply.size} of ${optimized.size} optimized file(s): ${[...toApply.keys()].join(', ')}`);
 
   // Write each optimized file (validate paths to prevent traversal)
   const cwd = process.cwd();
-  for (const [filePath, content] of optimized) {
+  for (const [filePath, content] of toApply) {
     const resolved = path.resolve(cwd, filePath);
     if (!resolved.startsWith(cwd)) {
       throw new Error(`Path traversal detected: ${filePath}`);
@@ -149,7 +189,7 @@ async function apply(): Promise<void> {
   Bun.spawnSync(['git', 'config', 'user.email', 'skill-review[bot]@users.noreply.github.com']);
 
   // Commit and push
-  const gitAdd = Bun.spawnSync(['git', 'add', ...optimized.keys()]);
+  const gitAdd = Bun.spawnSync(['git', 'add', ...toApply.keys()]);
   if (gitAdd.exitCode !== 0) {
     throw new Error(`git add failed: ${gitAdd.stderr.toString()}`);
   }
@@ -180,7 +220,7 @@ async function apply(): Promise<void> {
   console.log('Optimization applied and pushed successfully.');
 
   // Post confirmation comment with key improvements summary
-  const files = [...optimized.keys()].map(f => `\`${f}\``).join(', ');
+  const files = [...toApply.keys()].map(f => `\`${f}\``).join(', ');
   const improvements = extractKeyImprovements(botComment.body);
   let confirmBody = `✅ Applied optimized ${files} (${commitSha}).`;
   if (improvements.length > 0) {

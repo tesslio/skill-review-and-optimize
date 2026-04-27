@@ -46,6 +46,7 @@ const { getChangedSkillFiles } = await import('./changed-files.ts');
 const { runSkillReview, runSkillOptimize, extractJson, parseOptimizeIterations } = await import('./skill-review.ts');
 const { postOrUpdateComment } = await import('./comment.ts');
 const { parseThreshold } = await import('./main.ts');
+const { parseRequestedPath } = await import('./apply.ts');
 
 // ---------------------------------------------------------------------------
 // 1. parseThreshold
@@ -579,6 +580,102 @@ describe('postOrUpdateComment', () => {
     expect(body).toContain('Improved content');
   });
 
+  test('single optimized skill shows bare /apply-optimize CTA', async () => {
+    listCommentsMock.mockResolvedValueOnce({ data: [] });
+
+    await postOrUpdateComment(
+      [{
+        skillPath: 'skills/only/SKILL.md',
+        passed: true,
+        score: 60,
+        output: 'review output',
+        optimize: {
+          optimized: true,
+          beforeScore: 60,
+          afterScore: 90,
+          optimizedContent: 'Improved',
+        },
+      }],
+      0,
+    );
+
+    const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+    const body = callArgs.body as string;
+    expect(body).toContain('Comment `/apply-optimize` to apply this change');
+    expect(body).not.toContain('/apply-optimize skills/only/SKILL.md');
+  });
+
+  test('multiple optimized skills show per-skill /apply-optimize CTA', async () => {
+    listCommentsMock.mockResolvedValueOnce({ data: [] });
+
+    const optimize = (before: number, after: number) => ({
+      optimized: true,
+      beforeScore: before,
+      afterScore: after,
+      optimizedContent: 'Improved',
+    });
+
+    await postOrUpdateComment(
+      [
+        { skillPath: 'skills/a/SKILL.md', passed: true, score: 60, output: 'a', optimize: optimize(60, 90) },
+        { skillPath: 'skills/b/SKILL.md', passed: true, score: 50, output: 'b', optimize: optimize(50, 85) },
+      ],
+      0,
+    );
+
+    const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+    const body = callArgs.body as string;
+    expect(body).toContain('`/apply-optimize skills/a/SKILL.md`');
+    expect(body).toContain('`/apply-optimize skills/b/SKILL.md`');
+    expect(body).toContain('or `/apply-optimize` to apply all');
+  });
+
+  test('optimize comment caps key improvements at 3 and strips Suggestion column', async () => {
+    listCommentsMock.mockResolvedValueOnce({ data: [] });
+
+    // Mock review output with 4 dimensions (= 4 suggestions) — should cap at 3
+    const reviewOutput = [
+      '### Review Details',
+      '',
+      '| Dimension | Score | Detail | Suggestion |',
+      '|-----------|-------|--------|------------|',
+      '| **conciseness** | ██░ 2/3 | verbose detail | suggestion one |',
+      '| **actionability** | █░░ 1/3 | vague detail | suggestion two |',
+      '| **clarity** | ██░ 2/3 | unclear detail | suggestion three |',
+      '| **structure** | ██░ 2/3 | flat detail | suggestion four |',
+    ].join('\n');
+
+    await postOrUpdateComment(
+      [{
+        skillPath: 'a/SKILL.md',
+        passed: true,
+        score: 60,
+        output: reviewOutput,
+        optimize: {
+          optimized: true,
+          beforeScore: 60,
+          afterScore: 90,
+          optimizedContent: 'Improved',
+        },
+      }],
+      0,
+    );
+
+    const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+    const body = callArgs.body as string;
+
+    // Top 3 only in Key improvements
+    expect(body).toContain('- suggestion one');
+    expect(body).toContain('- suggestion two');
+    expect(body).toContain('- suggestion three');
+    expect(body).not.toContain('- suggestion four');
+
+    // Suggestion column dropped from the table (header + data rows)
+    expect(body).not.toContain('| Suggestion |');
+    expect(body).toContain('| Dimension | Score | Detail |');
+    expect(body).not.toMatch(/\| suggestion (one|two|three|four) \|/);
+  });
+
   test('comment shows no optimization needed', async () => {
     listCommentsMock.mockResolvedValueOnce({ data: [] });
 
@@ -620,6 +717,36 @@ describe('postOrUpdateComment', () => {
 // ---------------------------------------------------------------------------
 // 6. parseOptimizeIterations
 // ---------------------------------------------------------------------------
+
+describe('parseRequestedPath', () => {
+  test('returns undefined for bare /apply-optimize', () => {
+    expect(parseRequestedPath('/apply-optimize')).toBeUndefined();
+  });
+
+  test('returns the path when it ends with SKILL.md', () => {
+    expect(parseRequestedPath('/apply-optimize payments/SKILL.md'))
+      .toBe('payments/SKILL.md');
+  });
+
+  test('returns undefined for chatty comments without a SKILL.md path', () => {
+    expect(parseRequestedPath('/apply-optimize when you get a chance')).toBeUndefined();
+    expect(parseRequestedPath('Hey can you /apply-optimize for me?')).toBeUndefined();
+  });
+
+  test('handles tab-separated paths', () => {
+    expect(parseRequestedPath('/apply-optimize\tpayments/SKILL.md'))
+      .toBe('payments/SKILL.md');
+  });
+
+  test('finds the command anywhere in the body', () => {
+    expect(parseRequestedPath('Sure thing — /apply-optimize a/SKILL.md please'))
+      .toBe('a/SKILL.md');
+  });
+
+  test('returns undefined when path is on a different line than the command', () => {
+    expect(parseRequestedPath('/apply-optimize\npayments/SKILL.md')).toBeUndefined();
+  });
+});
 
 describe('parseOptimizeIterations', () => {
   test('returns 3 for undefined', () => {
