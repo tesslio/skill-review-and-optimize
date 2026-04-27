@@ -22,7 +22,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: tesslio/skill-review-and-optimize@bff9490027d60847df6494fdac7dccfb3ad82948
+      - uses: tesslio/skill-review-and-optimize@ec0f6a0784ac592e630b53d39242c2f7d22984a6
 ```
 
 Any PR that modifies a `SKILL.md` file gets an automated review comment with scores and feedback.
@@ -30,7 +30,7 @@ Any PR that modifies a `SKILL.md` file gets an automated review comment with sco
 ### Review + Optimize (requires Tessl API token)
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@bff9490027d60847df6494fdac7dccfb3ad82948
+- uses: tesslio/skill-review-and-optimize@ec0f6a0784ac592e630b53d39242c2f7d22984a6
   with:
     optimize: true
     tessl-token: ${{ secrets.TESSL_API_TOKEN }}
@@ -62,7 +62,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: tesslio/skill-review-and-optimize@bff9490027d60847df6494fdac7dccfb3ad82948
+      - uses: tesslio/skill-review-and-optimize@ec0f6a0784ac592e630b53d39242c2f7d22984a6
         with:
           mode: apply
 ```
@@ -103,7 +103,7 @@ No CLI install or workspace setup required.
 ### Cherry-picking individual changes (inline suggestions)
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@bff9490027d60847df6494fdac7dccfb3ad82948
+- uses: tesslio/skill-review-and-optimize@ec0f6a0784ac592e630b53d39242c2f7d22984a6
   with:
     optimize: true
     inline-suggestions: true
@@ -115,7 +115,7 @@ When `inline-suggestions: true`, each diff hunk between the user's `SKILL.md` an
 ### Setting a quality gate
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@bff9490027d60847df6494fdac7dccfb3ad82948
+- uses: tesslio/skill-review-and-optimize@ec0f6a0784ac592e630b53d39242c2f7d22984a6
   with:
     fail-threshold: 70
 ```
@@ -128,15 +128,18 @@ PRs with any skill scoring below 70% will fail the check.
 2. Installs the [Tessl CLI](https://tessl.io)
 3. Runs `tessl skill review` on each changed skill
 4. If `optimize: true` and `tessl-token` is provided, runs optimization and captures suggested improvements
-5. Posts (or updates) a review comment on the PR with scores, feedback, and optimization suggestions
-6. Optionally fails the check if any score is below the threshold
-7. If a user comments `/apply-optimize`, the apply workflow extracts optimized content from the review comment and commits it to the PR branch
+5. Posts (or updates) a summary comment on the PR with the score, an opportunity-framed headline, a review-details table per dimension, and a CTA pointing at the Files Changed tab
+6. If `inline-suggestions: true`, also posts a single batched PR review with one inline `suggestion` block per diff hunk so authors can click "Commit suggestion" to cherry-pick changes
+7. Optionally fails the check if any score is below the threshold
+8. If a repo collaborator comments `/apply-optimize`, the apply workflow extracts optimized content from the summary comment and commits it to the PR branch
 
 When optimize is enabled but no token is provided, the action runs review-only and includes a prompt in the comment to set up optimization.
 
 ## Comment behavior
 
-The action posts a single comment per PR. On subsequent pushes, it updates the existing comment rather than creating a new one. Optimized skills show before/after score badges and the suggested content in a collapsible section.
+The action posts a single summary comment per PR. On subsequent pushes, it updates the existing comment in place rather than creating a new one. The summary shows before/after score badges, an opportunity headline, a review-details table with per-dimension feedback (Suggestion column included), and a CTA. The full optimized content is stored as a hidden base64 anchor so `/apply-optimize` can still extract it without cluttering the rendered view.
+
+When `inline-suggestions: true`, each PR run also posts a single batched review on the Files Changed tab. Prior bot suggestion comments from earlier runs are deleted before posting so suggestions don't pile up on the same line across re-runs.
 
 ## Local development
 
