@@ -885,8 +885,34 @@ describe('computeSuggestionHunks', () => {
     const hunks = computeSuggestionHunks(original, optimized);
     expect(hunks).toHaveLength(1);
     expect(hunks[0]?.startLine).toBe(hunks[0]?.endLine);
-    // Suggestion body includes the anchor line + the inserted line
-    expect(hunks[0]?.newContent.split('\n')).toContain('b');
+    // Mid-file insertion: anchor line "a" first, then "b"
+    expect(hunks[0]?.newContent).toBe('a\nb');
+  });
+
+  test('top-of-file insertion places new content before line 1', () => {
+    const original = 'second\nthird';
+    const optimized = 'first\nsecond\nthird';
+    const hunks = computeSuggestionHunks(original, optimized);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]?.startLine).toBe(1);
+    expect(hunks[0]?.endLine).toBe(1);
+    // Inserted content must come *before* the original line 1
+    expect(hunks[0]?.newContent).toBe('first\nsecond');
+  });
+
+  test('CRLF line endings do not produce false-positive hunks', () => {
+    const originalCrlf = 'line one\r\nline two\r\nline three';
+    const optimizedLf = 'line one\nline two\nline three';
+    expect(computeSuggestionHunks(originalCrlf, optimizedLf)).toEqual([]);
+  });
+
+  test('CRLF input strips \\r from suggestion bodies', () => {
+    const originalCrlf = 'line one\r\nline two\r\nline three';
+    const optimizedCrlf = 'line one\r\nLINE TWO\r\nline three';
+    const hunks = computeSuggestionHunks(originalCrlf, optimizedCrlf);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]?.newContent).toBe('LINE TWO');
+    expect(hunks[0]?.newContent).not.toContain('\r');
   });
 
   test('produces multiple hunks for non-contiguous changes', () => {

@@ -82,6 +82,13 @@ async function postReply(
   }
 }
 
+/** Author associations allowed to trigger /apply-optimize. */
+const ALLOWED_ASSOCIATIONS = new Set([
+  'OWNER',
+  'MEMBER',
+  'COLLABORATOR',
+]);
+
 async function apply(): Promise<void> {
   const token = process.env.GITHUB_TOKEN;
   if (!token) {
@@ -91,8 +98,31 @@ async function apply(): Promise<void> {
   const context = github.context;
   const octokit = github.getOctokit(token);
 
+  // Get PR number from the issue_comment event
+  const prNumber = context.payload.issue?.number;
+  if (!prNumber) {
+    throw new Error('No PR number found in event payload');
+  }
+
+  // Defense in depth: refuse if the trigger commenter isn't a collaborator.
+  // Workflows should also gate this via `if: contains(...)` but we check here
+  // too so a misconfigured workflow can't be used to commit attacker content.
+  const triggerComment = context.payload.comment as
+    | { author_association?: string; id?: number; body?: string }
+    | undefined;
+  const triggerAssoc = triggerComment?.author_association;
+  if (!triggerAssoc || !ALLOWED_ASSOCIATIONS.has(triggerAssoc)) {
+    await postReply(
+      octokit,
+      context,
+      prNumber,
+      `⚠️ \`/apply-optimize\` is restricted to repo collaborators (got author_association \`${triggerAssoc ?? 'NONE'}\`).`,
+    );
+    return;
+  }
+
   // Acknowledge the trigger immediately with 👀
-  const triggerCommentId = context.payload.comment?.id as number | undefined;
+  const triggerCommentId = triggerComment?.id;
   if (triggerCommentId) {
     try {
       await octokit.rest.reactions.createForIssueComment({
@@ -104,12 +134,6 @@ async function apply(): Promise<void> {
     } catch {
       // Non-critical
     }
-  }
-
-  // Get PR number from the issue_comment event
-  const prNumber = context.payload.issue?.number;
-  if (!prNumber) {
-    throw new Error('No PR number found in event payload');
   }
 
   // Verify this is a PR (not a regular issue)
@@ -145,7 +169,12 @@ async function apply(): Promise<void> {
       page,
     });
 
-    botComment = comments.find((c) => c.body?.includes(COMMENT_MARKER));
+    // SECURITY: only trust comments authored by a Bot (e.g. github-actions[bot]).
+    // Without this filter, any human commenter could spoof the marker and have
+    // their base64 anchor extracted and committed to the PR branch.
+    botComment = comments.find(
+      (c) => c.user?.type === 'Bot' && c.body?.includes(COMMENT_MARKER),
+    );
     if (comments.length < 100) break;
     page++;
   }
@@ -188,9 +217,12 @@ async function apply(): Promise<void> {
 
   // Write each optimized file (validate paths to prevent traversal)
   const cwd = process.cwd();
+  const cwdWithSep = cwd.endsWith(path.sep) ? cwd : cwd + path.sep;
   for (const [filePath, content] of toApply) {
     const resolved = path.resolve(cwd, filePath);
-    if (!resolved.startsWith(cwd)) {
+    // Strict prefix check: `resolved.startsWith(cwd)` alone would let
+    // `/x/repo-evil/SKILL.md` escape from `cwd = /x/repo`.
+    if (resolved !== cwd && !resolved.startsWith(cwdWithSep)) {
       throw new Error(`Path traversal detected: ${filePath}`);
     }
     if (!filePath.endsWith('/SKILL.md') && !filePath.endsWith('SKILL.md')) {

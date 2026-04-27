@@ -67,10 +67,16 @@ export function computeSuggestionHunks(
   original: string,
   optimized: string,
 ): SuggestionHunk[] {
-  if (original === optimized) return [];
+  // Normalize CRLF/CR to LF before diffing. Without this, an optimizer that
+  // produces LF-only output would generate a "modification" hunk for every
+  // line of a Windows-authored CRLF file. The diff library matches lines
+  // exactly, so \r is significant.
+  const normOriginal = original.replace(/\r\n?/g, '\n');
+  const normOptimized = optimized.replace(/\r\n?/g, '\n');
+  if (normOriginal === normOptimized) return [];
 
-  const patch = structuredPatch('', '', original, optimized, '', '', { context: 0 });
-  const originalLines = original.split('\n');
+  const patch = structuredPatch('', '', normOriginal, normOptimized, '', '', { context: 0 });
+  const originalLines = normOriginal.split('\n');
   const result: SuggestionHunk[] = [];
 
   for (const hunk of patch.hunks) {
@@ -82,16 +88,27 @@ export function computeSuggestionHunks(
     }
 
     if (removed.length === 0 && added.length > 0) {
-      // Pure insertion: anchor to the preceding line (hunk.oldStart - 1 in
-      // 1-based; clamp to 1 if at file start) and prepend its content to the
-      // suggestion so GitHub treats it as a single-line replacement.
-      const anchorLine = Math.max(1, hunk.oldStart - 1);
-      const contextLine = originalLines[anchorLine - 1] ?? '';
-      result.push({
-        startLine: anchorLine,
-        endLine: anchorLine,
-        newContent: contextLine + '\n' + added.join('\n'),
-      });
+      if (hunk.oldStart === 1) {
+        // Top-of-file insertion: anchor to line 1, body is the new lines
+        // followed by the existing line 1 (so the inserted content lands
+        // *before* line 1, not after).
+        const firstLine = originalLines[0] ?? '';
+        result.push({
+          startLine: 1,
+          endLine: 1,
+          newContent: added.join('\n') + '\n' + firstLine,
+        });
+      } else {
+        // Mid-file insertion: anchor to the preceding line and append the
+        // new content after it (single-line replacement that grows).
+        const anchorLine = hunk.oldStart - 1;
+        const contextLine = originalLines[anchorLine - 1] ?? '';
+        result.push({
+          startLine: anchorLine,
+          endLine: anchorLine,
+          newContent: contextLine + '\n' + added.join('\n'),
+        });
+      }
     } else if (removed.length > 0 && added.length === 0) {
       result.push({
         startLine: hunk.oldStart,

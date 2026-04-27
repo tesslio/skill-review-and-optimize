@@ -30,7 +30,12 @@ async function deletePriorSuggestions(
       page,
     });
     for (const c of data) {
-      if (c.body?.includes(REVIEW_COMMENT_MARKER)) ours.push(c.id);
+      // SECURITY: only delete bot-authored comments. A human reviewer who
+      // quotes the marker (e.g. via "Quote reply") must not have their
+      // comment silently deleted.
+      if (c.user?.type === 'Bot' && c.body?.includes(REVIEW_COMMENT_MARKER)) {
+        ours.push(c.id);
+      }
     }
     if (data.length < 100) break;
     page++;

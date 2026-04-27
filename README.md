@@ -52,7 +52,8 @@ jobs:
   apply:
     if: >
       github.event.issue.pull_request &&
-      contains(github.event.comment.body, '/apply-optimize')
+      contains(github.event.comment.body, '/apply-optimize') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -66,7 +67,9 @@ jobs:
           mode: apply
 ```
 
-When a user comments `/apply-optimize` on a PR that has a Tessl review comment with optimization suggestions, this workflow extracts the optimized content and commits it directly to the PR branch.
+When a repo collaborator comments `/apply-optimize` on a PR that has a Tessl review comment with optimization suggestions, this workflow extracts the optimized content and commits it directly to the PR branch.
+
+> **Security:** the `author_association` filter restricts `/apply-optimize` to repo collaborators. The action also enforces this at runtime as defense in depth, so a missing or relaxed filter cannot let an arbitrary commenter trigger commits to your PR branch.
 
 When a PR has more than one optimized skill, you can apply just one of them by including the path:
 
