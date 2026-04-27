@@ -58,7 +58,8 @@ export async function postInlineSuggestions(
     });
 
     const reviewBody =
-      `Tessl optimizer found **${comments.length} suggestion${comments.length === 1 ? '' : 's'}** for \`${result.skillPath}\`. ` +
+      `Tessl optimizer found **${comments.length} suggestion${comments.length === 1 ? '' : 's'}** for \`${result.skillPath}\`, ` +
+      `comparing your draft against the optimizer's improved version — anchored to lines in your file (visible on the right of the diff). ` +
       `Click "Commit suggestion" on each change you want to accept, or comment \`/apply-optimize\` to accept all at once.`;
 
     await octokit.rest.pulls.createReview({
