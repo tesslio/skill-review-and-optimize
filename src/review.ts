@@ -1,17 +1,63 @@
 import * as github from '@actions/github';
 import {
+  REVIEW_COMMENT_MARKER,
   computeSuggestionHunks,
   formatSuggestionBody,
 } from './inline-suggestions.ts';
 import type { SkillReviewResult } from './skill-review.ts';
 
+type Octokit = ReturnType<typeof github.getOctokit>;
+
+/**
+ * Delete prior inline suggestion comments posted by this action so re-runs
+ * don't pile up duplicate suggestions on the same line. Identified via the
+ * REVIEW_COMMENT_MARKER stamped into every body we post.
+ */
+async function deletePriorSuggestions(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  prNumber: number,
+): Promise<void> {
+  let page = 1;
+  const ours: number[] = [];
+  while (true) {
+    const { data } = await octokit.rest.pulls.listReviewComments({
+      owner,
+      repo,
+      pull_number: prNumber,
+      per_page: 100,
+      page,
+    });
+    for (const c of data) {
+      if (c.body?.includes(REVIEW_COMMENT_MARKER)) ours.push(c.id);
+    }
+    if (data.length < 100) break;
+    page++;
+  }
+  for (const commentId of ours) {
+    try {
+      await octokit.rest.pulls.deleteReviewComment({
+        owner,
+        repo,
+        comment_id: commentId,
+      });
+    } catch {
+      // Already deleted or otherwise inaccessible. Ignore.
+    }
+  }
+  if (ours.length > 0) {
+    console.log(`Cleaned up ${ours.length} prior suggestion comment(s)`);
+  }
+}
+
 /**
  * Post a single PR review per workflow run, with an inline `suggestion` block
  * for each diff hunk between the user's SKILL.md and the optimizer's version.
  *
- * Runs alongside the issue summary comment — does not replace it. On re-runs,
- * GitHub auto-marks prior reviews "Outdated" once the PR HEAD changes; we do
- * not dismiss them in v1.
+ * Runs alongside the issue summary comment, does not replace it. Prior bot
+ * suggestion comments are deleted before posting so the same suggestion
+ * doesn't accumulate on the same line across re-runs.
  */
 export async function postInlineSuggestions(
   results: SkillReviewResult[],
@@ -29,6 +75,10 @@ export async function postInlineSuggestions(
 
   const octokit = github.getOctokit(token);
   const prNumber = context.payload.pull_request.number;
+  const owner = context.repo.owner;
+  const repo = context.repo.repo;
+
+  await deletePriorSuggestions(octokit, owner, repo, prNumber);
 
   for (const result of results) {
     const optimizedContent = result.optimize?.optimizedContent;
@@ -43,7 +93,7 @@ export async function postInlineSuggestions(
     const comments = hunks.map((hunk) => {
       const base = {
         path: result.skillPath,
-        body: formatSuggestionBody(hunk.newContent),
+        body: `${REVIEW_COMMENT_MARKER}\n${formatSuggestionBody(hunk.newContent)}`,
         line: hunk.endLine,
         side: 'RIGHT' as const,
       };
@@ -57,13 +107,13 @@ export async function postInlineSuggestions(
       return base;
     });
 
-    const filesUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${prNumber}/files`;
+    const filesUrl = `https://github.com/${owner}/${repo}/pull/${prNumber}/files`;
     const reviewBody =
-      `**${comments.length} suggestion${comments.length === 1 ? '' : 's'}** on \`${result.skillPath}\` — review on the [Files changed](${filesUrl}) tab.`;
+      `**${comments.length} suggestion${comments.length === 1 ? '' : 's'}** on \`${result.skillPath}\`. Review on the [Files changed](${filesUrl}) tab.`;
 
     await octokit.rest.pulls.createReview({
-      owner: context.repo.owner,
-      repo: context.repo.repo,
+      owner,
+      repo,
       pull_number: prNumber,
       commit_id: commitId,
       event: 'COMMENT',

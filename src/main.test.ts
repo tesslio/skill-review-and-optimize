@@ -559,7 +559,7 @@ describe('postOrUpdateComment', () => {
     expect(body).toContain('suggest an optimized version automatically');
   });
 
-  test('comment shows opportunity sentence and hidden anchor when optimized', async () => {
+  test('comment shows score badges and opportunity sentence when optimized', async () => {
     listCommentsMock.mockResolvedValueOnce({ data: [] });
 
     await postOrUpdateComment(
@@ -581,11 +581,20 @@ describe('postOrUpdateComment', () => {
 
     const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     const body = callArgs.body as string;
-    expect(body).toContain('Take this skill from 60% to 90%');
+    // Score badges (visual)
+    expect(body).toContain('before-60%25');
+    expect(body).toContain('after-90%25');
+    // Opportunity sentence (textual)
+    expect(body).toContain('opportunity to take this skill from 60% to 90%');
+    expect(body).toContain('Have a look at the suggestions');
+    // Review details collapsed
     expect(body).toContain('Review Details');
+    // No removed sections
     expect(body).not.toContain('Key improvements');
     expect(body).not.toContain('View all changes (diff)');
-    // The full optimized content lives in a hidden base64 anchor for /apply-optimize
+    // No em-dashes in our copy
+    expect(body).not.toContain(' — ');
+    // Hidden anchor for /apply-optimize
     expect(body).toMatch(/<!--tessl-optimized-b64:a\/SKILL\.md:[A-Za-z0-9+/=]+-->/);
   });
 

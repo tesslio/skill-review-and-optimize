@@ -1,5 +1,12 @@
 import { structuredPatch } from 'diff';
 
+/**
+ * Hidden marker stamped into every inline suggestion comment we post. Lets us
+ * detect and clean up our own prior review comments on subsequent workflow
+ * runs so the same suggestion doesn't pile up on the same line.
+ */
+export const REVIEW_COMMENT_MARKER = '<!--tessl-suggestion-->';
+
 export interface SuggestionHunk {
   /** First line of the range in the original file (1-based). Anchor for GitHub. */
   startLine: number;

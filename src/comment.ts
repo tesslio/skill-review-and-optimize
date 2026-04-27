@@ -60,7 +60,10 @@ function formatComment(
     } else if (result.optimize?.optimized) {
       const before = result.optimize.beforeScore;
       const after = result.optimize.afterScore;
-      body = `🎯 **Take this skill from ${before}% to ${after}%** — accept the suggestions below.\n\n`;
+      const beforeBadge = scoreBadge(before, 'before');
+      const afterBadge = scoreBadge(after, 'after');
+      body = `${beforeBadge} → ${afterBadge}\n\n`;
+      body += `🎯 **An opportunity to take this skill from ${before}% to ${after}%.** Have a look at the suggestions below.\n\n`;
 
       // Single source of truth for per-dimension feedback: the review table
       // (with the Suggestion column intact).
