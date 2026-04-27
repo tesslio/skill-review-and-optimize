@@ -44,28 +44,6 @@ export function encodeOptimizedAnchor(skillPath: string, content: string): strin
 }
 
 /**
- * Render a compact unified diff between two strings — for use inside a
- * GitHub ` ```diff ` fenced block. Skips the file headers (Index/===) that
- * `createPatch` adds by default.
- */
-export function formatUnifiedDiff(
-  original: string,
-  optimized: string,
-  context = 2,
-): string {
-  if (original === optimized) return '';
-  const patch = structuredPatch('', '', original, optimized, '', '', { context });
-  const lines: string[] = [];
-  for (const hunk of patch.hunks) {
-    lines.push(
-      `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`,
-    );
-    lines.push(...hunk.lines);
-  }
-  return lines.join('\n');
-}
-
-/**
  * Compute hunks of change between original and optimized content, mapped to
  * GitHub suggestion-comment shape (anchored to lines in the original).
  *

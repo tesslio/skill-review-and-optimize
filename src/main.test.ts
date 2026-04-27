@@ -51,7 +51,6 @@ const {
   pickFenceLength,
   formatSuggestionBody,
   computeSuggestionHunks,
-  formatUnifiedDiff,
   encodeOptimizedAnchor,
 } = await import('./inline-suggestions.ts');
 
@@ -560,7 +559,7 @@ describe('postOrUpdateComment', () => {
     expect(body).toContain('suggest an optimized version automatically');
   });
 
-  test('comment shows before/after badges and a diff view when optimized', async () => {
+  test('comment shows opportunity sentence and hidden anchor when optimized', async () => {
     listCommentsMock.mockResolvedValueOnce({ data: [] });
 
     await postOrUpdateComment(
@@ -582,12 +581,10 @@ describe('postOrUpdateComment', () => {
 
     const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     const body = callArgs.body as string;
-    expect(body).toContain('before-60%25');
-    expect(body).toContain('after-90%25');
-    expect(body).toContain('View all changes (diff)');
-    expect(body).toContain('```diff');
-    expect(body).toContain('-Original content');
-    expect(body).toContain('+Improved content');
+    expect(body).toContain('Take this skill from 60% to 90%');
+    expect(body).toContain('Review Details');
+    expect(body).not.toContain('Key improvements');
+    expect(body).not.toContain('View all changes (diff)');
     // The full optimized content lives in a hidden base64 anchor for /apply-optimize
     expect(body).toMatch(/<!--tessl-optimized-b64:a\/SKILL\.md:[A-Za-z0-9+/=]+-->/);
   });
@@ -642,10 +639,9 @@ describe('postOrUpdateComment', () => {
     expect(body).toContain('or `/apply-optimize` to apply all');
   });
 
-  test('optimize comment caps key improvements at 3 and strips Suggestion column', async () => {
+  test('optimize comment keeps the full Suggestion column in the review table', async () => {
     listCommentsMock.mockResolvedValueOnce({ data: [] });
 
-    // Mock review output with 4 dimensions (= 4 suggestions) — should cap at 3
     const reviewOutput = [
       '### Review Details',
       '',
@@ -653,8 +649,6 @@ describe('postOrUpdateComment', () => {
       '|-----------|-------|--------|------------|',
       '| **conciseness** | ██░ 2/3 | verbose detail | suggestion one |',
       '| **actionability** | █░░ 1/3 | vague detail | suggestion two |',
-      '| **clarity** | ██░ 2/3 | unclear detail | suggestion three |',
-      '| **structure** | ██░ 2/3 | flat detail | suggestion four |',
     ].join('\n');
 
     await postOrUpdateComment(
@@ -676,16 +670,14 @@ describe('postOrUpdateComment', () => {
     const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     const body = callArgs.body as string;
 
-    // Top 3 only in Key improvements
-    expect(body).toContain('- suggestion one');
-    expect(body).toContain('- suggestion two');
-    expect(body).toContain('- suggestion three');
-    expect(body).not.toContain('- suggestion four');
+    // Suggestion column is intact in the review-details table
+    expect(body).toContain('| Suggestion |');
+    expect(body).toContain('| suggestion one |');
+    expect(body).toContain('| suggestion two |');
 
-    // Suggestion column dropped from the table (header + data rows)
-    expect(body).not.toContain('| Suggestion |');
-    expect(body).toContain('| Dimension | Score | Detail |');
-    expect(body).not.toMatch(/\| suggestion (one|two|three|four) \|/);
+    // No standalone "Key improvements" bullet section above the table
+    expect(body).not.toContain('Key improvements');
+    expect(body).not.toContain('- suggestion one');
   });
 
   test('comment shows no optimization needed', async () => {
@@ -893,29 +885,6 @@ describe('computeSuggestionHunks', () => {
     const optimized = 'a\nB\nc\nd\nE\nf\ng';
     const hunks = computeSuggestionHunks(original, optimized);
     expect(hunks).toHaveLength(2);
-  });
-});
-
-describe('formatUnifiedDiff', () => {
-  test('returns empty string for identical content', () => {
-    expect(formatUnifiedDiff('a\nb\nc', 'a\nb\nc')).toBe('');
-  });
-
-  test('produces a hunk header and ± lines for a modification', () => {
-    const diff = formatUnifiedDiff('a\nb\nc', 'a\nB\nc');
-    expect(diff).toContain('@@');
-    expect(diff).toContain('-b');
-    expect(diff).toContain('+B');
-  });
-
-  test('respects the context parameter', () => {
-    const original = 'a\nb\nc\nd\ne';
-    const optimized = 'a\nb\nC\nd\ne';
-    const diffFull = formatUnifiedDiff(original, optimized, 4);
-    const diffNarrow = formatUnifiedDiff(original, optimized, 0);
-    expect(diffFull.length).toBeGreaterThan(diffNarrow.length);
-    expect(diffNarrow).toContain('-c');
-    expect(diffNarrow).toContain('+C');
   });
 });
 
