@@ -121,6 +121,8 @@ export interface OptimizeResult {
   beforeScore: number;
   afterScore: number;
   optimizedContent?: string;
+  /** Pre-optimize file contents — used for rendering a diff in the PR comment. */
+  originalContent?: string;
   error?: string;
 }
 
@@ -302,5 +304,6 @@ export async function runSkillOptimize(
     beforeScore,
     afterScore,
     optimizedContent: contentChanged ? newContent : undefined,
+    originalContent: contentChanged ? originalContent : undefined,
   };
 }

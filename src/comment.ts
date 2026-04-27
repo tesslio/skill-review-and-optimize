@@ -1,9 +1,8 @@
 import * as github from '@actions/github';
 import type { SkillReviewResult } from './skill-review.ts';
+import { encodeOptimizedAnchor, formatUnifiedDiff } from './inline-suggestions.ts';
 
 export const COMMENT_MARKER = '<!-- tessl-skill-review -->';
-const OPTIMIZE_START = (path: string) => `<!-- tessl-optimized:${path} -->`;
-const OPTIMIZE_END = (path: string) => `<!-- /tessl-optimized:${path} -->`;
 
 /** Escape text for safe inclusion in markdown code fences */
 function escapeForCodeFence(text: string): string {
@@ -48,6 +47,12 @@ function stripSuggestionColumn(text: string): string {
     const stripped = protectedLine.replace(/\|[^|]*\|$/, '|');
     return stripped.replace(/\x00/g, '\\|');
   }).join('\n');
+}
+
+function pullRequestFilesUrl(): string {
+  const ctx = github.context;
+  const prNumber = ctx.payload.pull_request?.number;
+  return `https://github.com/${ctx.repo.owner}/${ctx.repo.repo}/pull/${prNumber}/files`;
 }
 
 function scoreBadge(score: number, label = 'Tessl Review Score'): string {
@@ -106,20 +111,26 @@ function formatComment(
       const reviewDetails = stripSuggestionColumn(result.output);
       body += `<details>\n<summary>Review Details</summary>\n\n${reviewDetails}\n\n</details>\n\n`;
 
-      // In inline mode, point users at the file-diff suggestions and subdue
-      // the full-optimized block (still required for `/apply-optimize` to find
-      // the content). In default mode, the details block is the primary
-      // surface for "view what changed."
       if (optimizeContext?.inlineSuggestionsEnabled) {
-        body += `💡 _Inline suggestions posted on the file diff — click "Commit suggestion" on each change you want to accept._\n\n`;
-        body += `<details>\n<summary>Or view full optimized SKILL.md (used by <code>/apply-optimize</code>)</summary>\n\n`;
-      } else {
-        body += `<details>\n<summary>View full optimized SKILL.md</summary>\n\n`;
+        const filesUrl = pullRequestFilesUrl();
+        body += `💡 _Inline suggestions posted on the file diff — click "Commit suggestion" to accept, or "Resolve" to dismiss. See the [Files changed](${filesUrl}) tab._\n\n`;
       }
-      body += `${OPTIMIZE_START(result.skillPath)}\n`;
-      body += `\`\`\`markdown\n${escapeForCodeFence(result.optimize.optimizedContent ?? '')}\n\`\`\`\n`;
-      body += `${OPTIMIZE_END(result.skillPath)}\n`;
-      body += `\n</details>\n`;
+
+      // Show the unified diff between the user's PR-head version and the
+      // optimizer's version so reviewers can see *where* changes happened.
+      const optimized = result.optimize.optimizedContent ?? '';
+      const original = result.optimize.originalContent ?? '';
+      if (original && optimized) {
+        const diff = formatUnifiedDiff(original, optimized);
+        body += `<details>\n<summary>View all changes (diff)</summary>\n\n`;
+        body += `\`\`\`diff\n${diff}\n\`\`\`\n`;
+        body += `\n</details>\n`;
+      }
+
+      // Hidden anchor so /apply-optimize can still extract the full optimized
+      // content from the comment body without showing it visibly.
+      body += `\n${encodeOptimizedAnchor(result.skillPath, optimized)}\n`;
+
       if (optimizedCount > 1) {
         body += `\nComment \`/apply-optimize ${result.skillPath}\` to apply this skill, or \`/apply-optimize\` to apply all.\n`;
       } else {

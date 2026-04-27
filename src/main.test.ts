@@ -51,6 +51,8 @@ const {
   pickFenceLength,
   formatSuggestionBody,
   computeSuggestionHunks,
+  formatUnifiedDiff,
+  encodeOptimizedAnchor,
 } = await import('./inline-suggestions.ts');
 
 // ---------------------------------------------------------------------------
@@ -558,7 +560,7 @@ describe('postOrUpdateComment', () => {
     expect(body).toContain('suggest an optimized version automatically');
   });
 
-  test('comment shows before/after badges when optimized', async () => {
+  test('comment shows before/after badges and a diff view when optimized', async () => {
     listCommentsMock.mockResolvedValueOnce({ data: [] });
 
     await postOrUpdateComment(
@@ -571,6 +573,7 @@ describe('postOrUpdateComment', () => {
           optimized: true,
           beforeScore: 60,
           afterScore: 90,
+          originalContent: '---\nname: test\n---\nOriginal content',
           optimizedContent: '---\nname: test\n---\nImproved content',
         },
       }],
@@ -581,8 +584,12 @@ describe('postOrUpdateComment', () => {
     const body = callArgs.body as string;
     expect(body).toContain('before-60%25');
     expect(body).toContain('after-90%25');
-    expect(body).toContain('View full optimized SKILL.md');
-    expect(body).toContain('Improved content');
+    expect(body).toContain('View all changes (diff)');
+    expect(body).toContain('```diff');
+    expect(body).toContain('-Original content');
+    expect(body).toContain('+Improved content');
+    // The full optimized content lives in a hidden base64 anchor for /apply-optimize
+    expect(body).toMatch(/<!--tessl-optimized-b64:a\/SKILL\.md:[A-Za-z0-9+/=]+-->/);
   });
 
   test('single optimized skill shows bare /apply-optimize CTA', async () => {
@@ -886,6 +893,47 @@ describe('computeSuggestionHunks', () => {
     const optimized = 'a\nB\nc\nd\nE\nf\ng';
     const hunks = computeSuggestionHunks(original, optimized);
     expect(hunks).toHaveLength(2);
+  });
+});
+
+describe('formatUnifiedDiff', () => {
+  test('returns empty string for identical content', () => {
+    expect(formatUnifiedDiff('a\nb\nc', 'a\nb\nc')).toBe('');
+  });
+
+  test('produces a hunk header and ± lines for a modification', () => {
+    const diff = formatUnifiedDiff('a\nb\nc', 'a\nB\nc');
+    expect(diff).toContain('@@');
+    expect(diff).toContain('-b');
+    expect(diff).toContain('+B');
+  });
+
+  test('respects the context parameter', () => {
+    const original = 'a\nb\nc\nd\ne';
+    const optimized = 'a\nb\nC\nd\ne';
+    const diffFull = formatUnifiedDiff(original, optimized, 4);
+    const diffNarrow = formatUnifiedDiff(original, optimized, 0);
+    expect(diffFull.length).toBeGreaterThan(diffNarrow.length);
+    expect(diffNarrow).toContain('-c');
+    expect(diffNarrow).toContain('+C');
+  });
+});
+
+describe('encodeOptimizedAnchor', () => {
+  test('produces a single-line HTML comment with base64-encoded content', () => {
+    const anchor = encodeOptimizedAnchor('foo/SKILL.md', 'hello world');
+    expect(anchor).toMatch(/^<!--tessl-optimized-b64:foo\/SKILL\.md:[A-Za-z0-9+/=]+-->$/);
+    // No literal newlines so it stays a single line in the comment
+    expect(anchor).not.toContain('\n');
+  });
+
+  test('round-trips arbitrary markdown content via base64', () => {
+    const content = '---\nname: x\n---\n# Heading\n\n```ts\nconst y = 1;\n```\n';
+    const anchor = encodeOptimizedAnchor('skills/x/SKILL.md', content);
+    const match = anchor.match(/<!--tessl-optimized-b64:.+?:([A-Za-z0-9+/=]+)-->/);
+    expect(match).not.toBeNull();
+    const decoded = Buffer.from(match![1]!, 'base64').toString('utf-8');
+    expect(decoded).toBe(content);
   });
 });
 

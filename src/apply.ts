@@ -36,14 +36,30 @@ export function parseRequestedPath(commentBody: string): string | undefined {
 
 function extractOptimizedContent(body: string): Map<string, string> {
   const results = new Map<string, string>();
-  const regex = /<!-- tessl-optimized:(.+?) -->\n```markdown\n([\s\S]*?)\n```\n<!-- \/tessl-optimized:\1 -->/g;
+
+  // Current format: hidden base64 anchor — `<!--tessl-optimized-b64:path:b64-->`
+  const b64Regex = /<!--tessl-optimized-b64:(.+?):([A-Za-z0-9+/=]+)-->/g;
   let match: RegExpExecArray | null;
-  while ((match = regex.exec(body)) !== null) {
+  while ((match = b64Regex.exec(body)) !== null) {
     const skillPath = match[1]!;
-    // Reverse the code fence escaping
+    try {
+      const content = Buffer.from(match[2]!, 'base64').toString('utf-8');
+      results.set(skillPath, content);
+    } catch {
+      // Skip malformed entries — caller will surface "no optimized content"
+    }
+  }
+
+  // Legacy format: visible markdown code block between paired HTML comments.
+  // Kept for backward compatibility with comments produced before the b64 switch.
+  const legacyRegex = /<!-- tessl-optimized:(.+?) -->\n```markdown\n([\s\S]*?)\n```\n<!-- \/tessl-optimized:\1 -->/g;
+  while ((match = legacyRegex.exec(body)) !== null) {
+    const skillPath = match[1]!;
+    if (results.has(skillPath)) continue; // Prefer the new format
     const content = match[2]!.replace(/` ` `/g, '```');
     results.set(skillPath, content);
   }
+
   return results;
 }
 

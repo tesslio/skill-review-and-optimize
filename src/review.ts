@@ -57,12 +57,17 @@ export async function postInlineSuggestions(
       return base;
     });
 
+    const reviewBody =
+      `Tessl optimizer found **${comments.length} suggestion${comments.length === 1 ? '' : 's'}** for \`${result.skillPath}\`. ` +
+      `Click "Commit suggestion" on each change you want to accept, or comment \`/apply-optimize\` to accept all at once.`;
+
     await octokit.rest.pulls.createReview({
       owner: context.repo.owner,
       repo: context.repo.repo,
       pull_number: prNumber,
       commit_id: commitId,
       event: 'COMMENT',
+      body: reviewBody,
       comments,
     });
 
