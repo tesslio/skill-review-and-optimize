@@ -3,6 +3,28 @@ import { dirname, join, resolve } from 'node:path';
 /** Resolve the tessl CLI binary from the action's own node_modules */
 const TESSL_BIN = resolve(import.meta.dir, '..', 'node_modules', '.bin', 'tessl');
 
+/**
+ * Run a single sequential `tessl --version` to force the binary's first-run
+ * verification/extraction to complete before any parallel review/optimize
+ * calls. Mitigates an upstream tessl CLI race where two parallel invocations
+ * both decide the binary is "corrupt" on first cold start, delete it, and
+ * each fail with ENOENT/ETXTBSY.
+ *
+ * Best-effort: we swallow errors here so a transient warmup failure doesn't
+ * block the actual review pass.
+ */
+export async function warmupTessl(): Promise<void> {
+  try {
+    const proc = Bun.spawn([TESSL_BIN, '--version'], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    await proc.exited;
+  } catch {
+    // Ignore — main.ts will surface any real failure on the first review.
+  }
+}
+
 /** Format a score dimension as a table row with visual bar */
 function scoreBar(score: number, max = 3): string {
   const filled = '█'.repeat(score);

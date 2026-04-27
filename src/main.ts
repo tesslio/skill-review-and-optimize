@@ -4,7 +4,7 @@ import { getChangedSkillFiles } from './changed-files.ts';
 import { postOrUpdateComment } from './comment.ts';
 import { postInlineSuggestions } from './review.ts';
 import type { SkillReviewResult } from './skill-review.ts';
-import { parseOptimizeIterations, runSkillOptimize, runSkillReview } from './skill-review.ts';
+import { parseOptimizeIterations, runSkillOptimize, runSkillReview, warmupTessl } from './skill-review.ts';
 
 const CONCURRENCY_LIMIT = 5;
 
@@ -32,6 +32,10 @@ async function main(): Promise<void> {
   if (process.env.TESSL_API_TOKEN) {
     core.setSecret(process.env.TESSL_API_TOKEN);
   }
+
+  // 2b. Warm up the tessl CLI sequentially so its first-run binary
+  // verification doesn't race when parallel reviews start.
+  await warmupTessl();
 
   // 3. Run reviews with concurrency limit
   const results: SkillReviewResult[] = [];
