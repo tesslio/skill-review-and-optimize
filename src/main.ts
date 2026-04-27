@@ -1,6 +1,8 @@
 import * as core from '@actions/core';
+import * as github from '@actions/github';
 import { getChangedSkillFiles } from './changed-files.ts';
 import { postOrUpdateComment } from './comment.ts';
+import { postInlineSuggestions } from './review.ts';
 import type { SkillReviewResult } from './skill-review.ts';
 import { parseOptimizeIterations, runSkillOptimize, runSkillReview } from './skill-review.ts';
 
@@ -12,6 +14,7 @@ async function main(): Promise<void> {
   const threshold = parseThreshold(process.env.INPUT_FAIL_THRESHOLD);
   const optimizeEnabled = process.env.INPUT_OPTIMIZE === 'true';
   const maxIterations = parseOptimizeIterations(process.env.INPUT_OPTIMIZE_ITERATIONS);
+  const inlineSuggestionsEnabled = process.env.INPUT_INLINE_SUGGESTIONS === 'true';
 
   // 1. Detect changed SKILL.md files
   const changedFiles = await getChangedSkillFiles(rootPath);
@@ -87,10 +90,26 @@ async function main(): Promise<void> {
   // 5. Post PR comment (may fail on fork PRs due to read-only token)
   if (shouldComment) {
     try {
-      await postOrUpdateComment(results, threshold, { skipped: optimizeSkipped });
+      await postOrUpdateComment(results, threshold, {
+        skipped: optimizeSkipped,
+        inlineSuggestionsEnabled,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       core.warning(`Could not post PR comment (expected for fork PRs): ${msg}`);
+    }
+  }
+
+  // 5b. Post inline suggestion blocks on the PR diff (opt-in)
+  if (inlineSuggestionsEnabled && optimizeEnabled) {
+    const commitId = github.context.payload.pull_request?.head?.sha as string | undefined;
+    if (commitId) {
+      try {
+        await postInlineSuggestions(results, commitId);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        core.warning(`Could not post inline suggestions: ${msg}`);
+      }
     }
   }
 

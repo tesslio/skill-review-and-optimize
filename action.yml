@@ -22,6 +22,9 @@ inputs:
   optimize-iterations:
     description: 'Max optimization iterations (1-10)'
     default: '3'
+  inline-suggestions:
+    description: 'Post optimization changes as inline GitHub `suggestion` blocks on the PR diff (in addition to the summary comment). Lets authors cherry-pick individual changes.'
+    default: 'false'
   tessl-token:
     description: 'Tessl API token for optimize mode. Get one at https://tessl.io/account/api-keys'
     required: false
@@ -43,6 +46,7 @@ runs:
         INPUT_FAIL_THRESHOLD: ${{ inputs.fail-threshold }}
         INPUT_OPTIMIZE: ${{ inputs.optimize }}
         INPUT_OPTIMIZE_ITERATIONS: ${{ inputs.optimize-iterations }}
+        INPUT_INLINE_SUGGESTIONS: ${{ inputs.inline-suggestions }}
         TESSL_API_TOKEN: ${{ inputs.tessl-token }}
         TESSL_TOKEN: ${{ inputs.tessl-token }}
         GITHUB_TOKEN: ${{ github.token }}

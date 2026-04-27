@@ -60,6 +60,7 @@ function scoreBadge(score: number, label = 'Tessl Review Score'): string {
 
 export interface OptimizeContext {
   skipped: boolean;
+  inlineSuggestionsEnabled?: boolean;
 }
 
 function formatComment(
@@ -104,7 +105,17 @@ function formatComment(
       // surfaced in Key improvements above
       const reviewDetails = stripSuggestionColumn(result.output);
       body += `<details>\n<summary>Review Details</summary>\n\n${reviewDetails}\n\n</details>\n\n`;
-      body += `<details>\n<summary>View full optimized SKILL.md</summary>\n\n`;
+
+      // In inline mode, point users at the file-diff suggestions and subdue
+      // the full-optimized block (still required for `/apply-optimize` to find
+      // the content). In default mode, the details block is the primary
+      // surface for "view what changed."
+      if (optimizeContext?.inlineSuggestionsEnabled) {
+        body += `💡 _Inline suggestions posted on the file diff — click "Commit suggestion" on each change you want to accept._\n\n`;
+        body += `<details>\n<summary>Or view full optimized SKILL.md (used by <code>/apply-optimize</code>)</summary>\n\n`;
+      } else {
+        body += `<details>\n<summary>View full optimized SKILL.md</summary>\n\n`;
+      }
       body += `${OPTIMIZE_START(result.skillPath)}\n`;
       body += `\`\`\`markdown\n${escapeForCodeFence(result.optimize.optimizedContent ?? '')}\n\`\`\`\n`;
       body += `${OPTIMIZE_END(result.skillPath)}\n`;

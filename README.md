@@ -94,7 +94,20 @@ No CLI install or workspace setup required.
 | `fail-threshold` | Minimum score (0-100) to pass. Set to `0` to never fail. | `0` |
 | `optimize` | Run skill optimization after review (requires `tessl-token`) | `false` |
 | `optimize-iterations` | Max optimization iterations (1-10) | `3` |
+| `inline-suggestions` | Post optimization changes as inline GitHub `suggestion` blocks on the PR diff (cherry-pick individual changes) | `false` |
 | `tessl-token` | Tessl API token for optimize mode | _(optional)_ |
+
+### Cherry-picking individual changes (inline suggestions)
+
+```yaml
+- uses: tesslio/skill-review-and-optimize@bff9490027d60847df6494fdac7dccfb3ad82948
+  with:
+    optimize: true
+    inline-suggestions: true
+    tessl-token: ${{ secrets.TESSL_API_TOKEN }}
+```
+
+When `inline-suggestions: true`, each diff hunk between the user's `SKILL.md` and the optimizer's version is posted as a GitHub native `suggestion` block on the file diff. Authors can click "Commit suggestion" on individual hunks to accept changes one at a time, alongside (or instead of) the all-at-once `/apply-optimize` flow.
 
 ### Setting a quality gate
 

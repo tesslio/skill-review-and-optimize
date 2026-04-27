@@ -47,6 +47,11 @@ const { runSkillReview, runSkillOptimize, extractJson, parseOptimizeIterations }
 const { postOrUpdateComment } = await import('./comment.ts');
 const { parseThreshold } = await import('./main.ts');
 const { parseRequestedPath } = await import('./apply.ts');
+const {
+  pickFenceLength,
+  formatSuggestionBody,
+  computeSuggestionHunks,
+} = await import('./inline-suggestions.ts');
 
 // ---------------------------------------------------------------------------
 // 1. parseThreshold
@@ -779,6 +784,110 @@ describe('parseOptimizeIterations', () => {
 // ---------------------------------------------------------------------------
 // 7. runSkillOptimize
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// 8. inline-suggestions: pickFenceLength, formatSuggestionBody, computeSuggestionHunks
+// ---------------------------------------------------------------------------
+
+describe('pickFenceLength', () => {
+  test('returns 3 for plain content with no backticks', () => {
+    expect(pickFenceLength('plain content')).toBe(3);
+  });
+
+  test('returns 3 for content with inline backticks (single)', () => {
+    expect(pickFenceLength('use `foo` for inline code')).toBe(3);
+  });
+
+  test('returns 4 when content contains a 3-backtick fence', () => {
+    const content = 'before\n```\ncode\n```\nafter';
+    expect(pickFenceLength(content)).toBe(4);
+  });
+
+  test('returns 5 when content contains a 4-backtick fence', () => {
+    const content = 'before\n````\ncode\n````\nafter';
+    expect(pickFenceLength(content)).toBe(5);
+  });
+
+  test('returns max+1 when multiple fence lengths are mixed', () => {
+    const content = '```\nshort\n```\n````\nlonger\n````';
+    expect(pickFenceLength(content)).toBe(5);
+  });
+});
+
+describe('formatSuggestionBody', () => {
+  test('wraps plain content in a 3-backtick suggestion fence', () => {
+    const result = formatSuggestionBody('hello world');
+    expect(result).toBe('```suggestion\nhello world\n```');
+  });
+
+  test('uses longer fence when content has nested backticks', () => {
+    const content = '```\ncode\n```';
+    const result = formatSuggestionBody(content);
+    expect(result.startsWith('````suggestion\n')).toBe(true);
+    expect(result.endsWith('\n````')).toBe(true);
+    expect(result).toContain(content);
+  });
+
+  test('includes intro text above the suggestion block', () => {
+    const result = formatSuggestionBody('new', 'Consider this:');
+    expect(result.startsWith('Consider this:\n\n```suggestion\n')).toBe(true);
+  });
+
+  test('handles empty content (pure deletion)', () => {
+    expect(formatSuggestionBody('')).toBe('```suggestion\n\n```');
+  });
+});
+
+describe('computeSuggestionHunks', () => {
+  test('returns no hunks when content is identical', () => {
+    expect(computeSuggestionHunks('a\nb\nc', 'a\nb\nc')).toEqual([]);
+  });
+
+  test('detects a single-line modification', () => {
+    const original = 'line one\nline two\nline three';
+    const optimized = 'line one\nLINE TWO\nline three';
+    const hunks = computeSuggestionHunks(original, optimized);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]?.startLine).toBe(2);
+    expect(hunks[0]?.endLine).toBe(2);
+    expect(hunks[0]?.newContent).toBe('LINE TWO');
+  });
+
+  test('detects a multi-line modification', () => {
+    const original = 'a\nb\nc\nd\ne';
+    const optimized = 'a\nB1\nB2\nC1\nd\ne';
+    const hunks = computeSuggestionHunks(original, optimized);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]?.startLine).toBe(2);
+    expect(hunks[0]?.endLine).toBe(3);
+    expect(hunks[0]?.newContent).toBe('B1\nB2\nC1');
+  });
+
+  test('detects a pure deletion (empty newContent)', () => {
+    const original = 'keep\nremove me\nkeep';
+    const optimized = 'keep\nkeep';
+    const hunks = computeSuggestionHunks(original, optimized);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]?.newContent).toBe('');
+  });
+
+  test('detects a pure insertion (anchored to preceding line)', () => {
+    const original = 'a\nc';
+    const optimized = 'a\nb\nc';
+    const hunks = computeSuggestionHunks(original, optimized);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]?.startLine).toBe(hunks[0]?.endLine);
+    // Suggestion body includes the anchor line + the inserted line
+    expect(hunks[0]?.newContent.split('\n')).toContain('b');
+  });
+
+  test('produces multiple hunks for non-contiguous changes', () => {
+    const original = 'a\nb\nc\nd\ne\nf\ng';
+    const optimized = 'a\nB\nc\nd\nE\nf\ng';
+    const hunks = computeSuggestionHunks(original, optimized);
+    expect(hunks).toHaveLength(2);
+  });
+});
 
 describe('runSkillOptimize', () => {
   let originalSpawn: typeof Bun.spawn;
