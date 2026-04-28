@@ -58,6 +58,8 @@ Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed
 
 That's it. Open a PR that changes a `SKILL.md` and the bot will comment.
 
+> ⚠️ **First-time setup gotcha — `/apply-optimize` won't work on the PR that introduces this workflow.** GitHub reads `issue_comment` workflows from your **default branch only**, never from a PR branch. So the very first time you add this file, you need to land it on `main` (typically by merging the PR that added it) before `/apply-optimize` fires on any PR. After that, it works on every future PR. The review side (the summary comment + inline suggestions) is unaffected — it works from the PR branch on the very first run.
+>
 > **The pinned SHA** (`@e7b9c0…`) keeps your workflow reproducible. Bump it from the [tags page](https://github.com/tesslio/skill-review-and-optimize/tags) when you intentionally upgrade.
 >
 > **Already wired this up as two separate workflows** (`skill-review.yml` + `apply-optimize.yml`) from an earlier setup? No migration needed — both patterns work identically. The single-file workflow above is just simpler to copy from scratch.
