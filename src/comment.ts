@@ -72,14 +72,17 @@ function formatComment(
       if (optimizeContext?.inlineSuggestionsEnabled) {
         const filesUrl = pullRequestFilesUrl();
         body += `### 👉 [Review suggestions on the Files changed tab](${filesUrl})\n\n`;
-        body += `Accept individually with **Commit suggestion**, batch several with **Add suggestion to batch**, or comment \`/apply-optimize\` to accept all.\n`;
         if (optimizedCount > 1) {
+          body += `Accept individually with **Commit suggestion**, batch several with **Add suggestion to batch**, or comment \`/apply-optimize\` to accept all changes across every skill.\n`;
           body += `\nOr comment \`/apply-optimize ${result.skillPath}\` to apply just this skill.\n`;
+        } else {
+          // Single-skill: include the path so the command is copy-pasteable.
+          body += `Accept individually with **Commit suggestion**, batch several with **Add suggestion to batch**, or comment \`/apply-optimize ${result.skillPath}\` to accept all changes for this skill.\n`;
         }
       } else if (optimizedCount > 1) {
         body += `Comment \`/apply-optimize ${result.skillPath}\` to apply this skill, or \`/apply-optimize\` to apply all.\n`;
       } else {
-        body += `Comment \`/apply-optimize\` to apply this change directly to the PR.\n`;
+        body += `Comment \`/apply-optimize ${result.skillPath}\` to apply this change directly to the PR.\n`;
       }
 
       // Hidden anchor so /apply-optimize can still extract the full optimized
