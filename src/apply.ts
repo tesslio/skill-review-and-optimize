@@ -29,9 +29,31 @@ function extractKeyImprovements(body: string): string[] {
  * not be mistakenly read as `/apply-optimize when`.
  */
 export function parseRequestedPath(commentBody: string): string | undefined {
-  const match = commentBody.match(/\/apply-optimize[ \t]+(\S+)/);
+  // `/i` flag accepts /Apply-Optimize, /APPLY-OPTIMIZE, etc.
+  const match = commentBody.match(/\/apply-optimize[ \t]+(\S+)/i);
   const candidate = match?.[1];
-  return candidate?.endsWith('SKILL.md') ? candidate : undefined;
+  // Case-insensitive SKILL.md suffix check forgives common typos like
+  // `discovery/skill.MD` or `discovery/Skill.md` — we still preserve the
+  // original casing of the candidate; the case-insensitive lookup against
+  // the optimized map happens in apply().
+  return candidate?.toLowerCase().endsWith('skill.md') ? candidate : undefined;
+}
+
+/**
+ * Find an entry in the optimized map by case-insensitive path match. Returns
+ * the canonical key (as stored by the bot's comment markers) so the actual
+ * file write uses the trusted casing — important on case-sensitive
+ * filesystems like the GitHub Actions Linux runner.
+ */
+export function findOptimizedEntry(
+  optimized: Map<string, string>,
+  requestedPath: string,
+): { key: string; content: string } | undefined {
+  const target = requestedPath.toLowerCase();
+  for (const [key, content] of optimized) {
+    if (key.toLowerCase() === target) return { key, content };
+  }
+  return undefined;
 }
 
 function extractOptimizedContent(body: string): Map<string, string> {
@@ -198,7 +220,8 @@ async function apply(): Promise<void> {
 
   let toApply = optimized;
   if (requestedPath) {
-    if (!optimized.has(requestedPath)) {
+    const matched = findOptimizedEntry(optimized, requestedPath);
+    if (!matched) {
       const available = [...optimized.keys()]
         .map((k) => `\`/apply-optimize ${k}\``)
         .join('\n- ');
@@ -210,7 +233,9 @@ async function apply(): Promise<void> {
       );
       return;
     }
-    toApply = new Map([[requestedPath, optimized.get(requestedPath)!]]);
+    // Use the canonical (bot-stored) key so the file write hits the right
+    // path on case-sensitive filesystems even if the user wrote a typo.
+    toApply = new Map([[matched.key, matched.content]]);
   }
 
   console.log(`Applying ${toApply.size} of ${optimized.size} optimized file(s): ${[...toApply.keys()].join(', ')}`);

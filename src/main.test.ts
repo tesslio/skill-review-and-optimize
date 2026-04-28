@@ -46,7 +46,7 @@ const { getChangedSkillFiles } = await import('./changed-files.ts');
 const { runSkillReview, runSkillOptimize, extractJson, parseOptimizeIterations } = await import('./skill-review.ts');
 const { postOrUpdateComment } = await import('./comment.ts');
 const { parseThreshold } = await import('./main.ts');
-const { parseRequestedPath } = await import('./apply.ts');
+const { parseRequestedPath, findOptimizedEntry } = await import('./apply.ts');
 const {
   pickFenceLength,
   formatSuggestionBody,
@@ -600,7 +600,7 @@ describe('postOrUpdateComment', () => {
     expect(body).toMatch(/<!--tessl-optimized-b64:a\/SKILL\.md:[A-Za-z0-9+/=]+-->/);
   });
 
-  test('single optimized skill shows bare /apply-optimize CTA', async () => {
+  test('single optimized skill shows the path-qualified /apply-optimize CTA', async () => {
     listCommentsMock.mockResolvedValueOnce({ data: [] });
 
     await postOrUpdateComment(
@@ -621,8 +621,8 @@ describe('postOrUpdateComment', () => {
 
     const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     const body = callArgs.body as string;
-    expect(body).toContain('Comment `/apply-optimize` to apply this change');
-    expect(body).not.toContain('/apply-optimize skills/only/SKILL.md');
+    // CTA should be copy-pasteable with the full skill path included
+    expect(body).toContain('`/apply-optimize skills/only/SKILL.md`');
   });
 
   test('multiple optimized skills show per-skill /apply-optimize CTA', async () => {
@@ -760,6 +760,45 @@ describe('parseRequestedPath', () => {
 
   test('returns undefined when path is on a different line than the command', () => {
     expect(parseRequestedPath('/apply-optimize\npayments/SKILL.md')).toBeUndefined();
+  });
+
+  test('forgives common typo casing of SKILL.md suffix', () => {
+    expect(parseRequestedPath('/apply-optimize discovery/skill.MD'))
+      .toBe('discovery/skill.MD');
+    expect(parseRequestedPath('/apply-optimize discovery/Skill.md'))
+      .toBe('discovery/Skill.md');
+    expect(parseRequestedPath('/apply-optimize discovery/SKILL.MD'))
+      .toBe('discovery/SKILL.MD');
+  });
+
+  test('forgives different casing of the command itself', () => {
+    expect(parseRequestedPath('/Apply-Optimize discovery/SKILL.md'))
+      .toBe('discovery/SKILL.md');
+    expect(parseRequestedPath('/APPLY-OPTIMIZE discovery/SKILL.md'))
+      .toBe('discovery/SKILL.md');
+  });
+});
+
+describe('findOptimizedEntry', () => {
+  const optimized = new Map([
+    ['discovery/SKILL.md', 'content-d'],
+    ['payments/SKILL.md', 'content-p'],
+  ]);
+
+  test('exact-case match returns canonical key + content', () => {
+    expect(findOptimizedEntry(optimized, 'discovery/SKILL.md'))
+      .toEqual({ key: 'discovery/SKILL.md', content: 'content-d' });
+  });
+
+  test('case-insensitive match still returns canonical key', () => {
+    expect(findOptimizedEntry(optimized, 'discovery/skill.MD'))
+      .toEqual({ key: 'discovery/SKILL.md', content: 'content-d' });
+    expect(findOptimizedEntry(optimized, 'DISCOVERY/SKILL.MD'))
+      .toEqual({ key: 'discovery/SKILL.md', content: 'content-d' });
+  });
+
+  test('returns undefined when no path matches', () => {
+    expect(findOptimizedEntry(optimized, 'unknown/SKILL.md')).toBeUndefined();
   });
 });
 
