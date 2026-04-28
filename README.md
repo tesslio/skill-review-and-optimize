@@ -1,147 +1,104 @@
-# Tessl Skill Review & Optimize Action
+# Tessl Skill Review
 
-A GitHub Action that reviews `SKILL.md` files changed in a pull request and optionally optimizes them with AI-powered suggestions.
+Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed in a PR, scores it, and posts inline suggestions the author can accept with one click.
 
-## Usage
+## What you'll see when a PR changes a SKILL.md
 
-Examples below pin this action to a specific commit SHA so your workflow stays reproducible and does not pick up unexpected changes from `main`. Replace the SHA when you intentionally upgrade; you can also use a [release tag](https://github.com/tesslio/skill-review-and-optimize/tags) if one is published.
+- A summary comment with a quality score and a per-dimension review of the skill
+- Inline `suggestion` blocks on the Files Changed tab — click **Commit suggestion** to accept changes one at a time, or use **Add suggestion to batch** to combine several into one commit
+- `/apply-optimize` (per skill or for the whole PR) as a one-shot way to take all changes via the bot
 
-### Review only (no authentication required)
+## Setup
 
-```yaml
-name: Skill Review
-on:
-  pull_request:
-    paths: ['**/SKILL.md']
+1. Get a [Tessl API token](https://tessl.io/account/api-keys) and add it as a repository secret named `TESSL_API_TOKEN`.
 
-jobs:
-  review:
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
-```
+2. Add `.github/workflows/skill-review.yml`:
 
-Any PR that modifies a `SKILL.md` file gets an automated review comment with scores and feedback.
+   ```yaml
+   name: Tessl Skill Review
+   on:
+     pull_request:
+       paths: ['**/SKILL.md']
+     issue_comment:
+       types: [created]
 
-### Review + Optimize (requires Tessl API token)
+   jobs:
+     review:
+       if: github.event_name == 'pull_request'
+       runs-on: ubuntu-latest
+       permissions:
+         pull-requests: write
+         contents: read
+       steps:
+         - uses: actions/checkout@v4
+         - uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
+           with:
+             optimize: true
+             inline-suggestions: true
+             tessl-token: ${{ secrets.TESSL_API_TOKEN }}
 
-```yaml
-- uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
-  with:
-    optimize: true
-    tessl-token: ${{ secrets.TESSL_API_TOKEN }}
-```
+     apply:
+       if: >
+         github.event_name == 'issue_comment' &&
+         github.event.issue.pull_request &&
+         contains(github.event.comment.body, '/apply-optimize') &&
+         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+       runs-on: ubuntu-latest
+       permissions:
+         pull-requests: write
+         contents: write
+       steps:
+         - uses: actions/checkout@v4
+           with:
+             fetch-depth: 0
+         - uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
+           with:
+             mode: apply
+   ```
 
-When optimize is enabled, the action reviews each skill, then runs AI-powered optimization and posts the suggested improved `SKILL.md` content directly in the PR comment. Users can then comment `/apply-optimize` to commit the optimized content to the PR branch.
+That's it. Open a PR that changes a `SKILL.md` and the bot will comment.
 
-### Apply optimized content (via `/apply-optimize` comment)
+> **The pinned SHA** (`@e7b9c0…`) keeps your workflow reproducible. Bump it from the [tags page](https://github.com/tesslio/skill-review-and-optimize/tags) when you intentionally upgrade.
+>
+> **Already wired this up as two separate workflows** (`skill-review.yml` + `apply-optimize.yml`) from an earlier setup? No migration needed — both patterns work identically. The single-file workflow above is just simpler to copy from scratch.
 
-Add a second workflow to let PR authors apply suggested optimizations with a single comment:
+## Optional: block PRs below a quality threshold
 
-```yaml
-name: Apply Skill Optimization
-on:
-  issue_comment:
-    types: [created]
-
-jobs:
-  apply:
-    if: >
-      github.event.issue.pull_request &&
-      contains(github.event.comment.body, '/apply-optimize') &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
-        with:
-          mode: apply
-```
-
-When a repo collaborator comments `/apply-optimize` on a PR that has a Tessl review comment with optimization suggestions, this workflow extracts the optimized content and commits it directly to the PR branch.
-
-> **Security:** the `author_association` filter restricts `/apply-optimize` to repo collaborators. The action also enforces this at runtime as defense in depth, so a missing or relaxed filter cannot let an arbitrary commenter trigger commits to your PR branch.
-
-When a PR has more than one optimized skill, you can apply just one of them by including the path:
-
-```
-/apply-optimize path/to/SKILL.md
-```
-
-The review comment shows the exact command to copy for each skill. Bare `/apply-optimize` still applies all optimized skills at once.
-
-#### Getting a TESSL_API_TOKEN
-
-1. Sign up or log in at [tessl.io](https://tessl.io)
-2. Get your API token at [tessl.io/account/api-keys](https://tessl.io/account/api-keys)
-3. Add it as a repository secret named `TESSL_API_TOKEN`
-
-No CLI install or workspace setup required.
-
-## Inputs
-
-| Input | Description | Default |
-|---|---|---|
-| `mode` | Action mode: `review` or `apply` | `review` |
-| `path` | Root path to search for SKILL.md files | `.` |
-| `comment` | Whether to post results as a PR comment | `true` |
-| `fail-threshold` | Minimum score (0-100) to pass. Set to `0` to never fail. | `0` |
-| `optimize` | Run skill optimization after review (requires `tessl-token`) | `false` |
-| `optimize-iterations` | Max optimization iterations (1-10) | `3` |
-| `inline-suggestions` | Post optimization changes as inline GitHub `suggestion` blocks on the PR diff (cherry-pick individual changes) | `false` |
-| `tessl-token` | Tessl API token for optimize mode | _(optional)_ |
-
-### Cherry-picking individual changes (inline suggestions)
+Add `fail-threshold` to the `review` job to fail the check when a skill scores below your minimum:
 
 ```yaml
 - uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
   with:
     optimize: true
     inline-suggestions: true
+    fail-threshold: 70
     tessl-token: ${{ secrets.TESSL_API_TOKEN }}
 ```
 
-When `inline-suggestions: true`, each diff hunk between the user's `SKILL.md` and the optimizer's version is posted as a GitHub native `suggestion` block on the file diff. Authors can click "Commit suggestion" on individual hunks to accept changes one at a time, alongside (or instead of) the all-at-once `/apply-optimize` flow.
+When `optimize: true`, the threshold is checked against the **post-optimize achievable score**. So skills the optimizer can lift above the threshold pass the check — the user has a one-click `/apply-optimize` path to merge. Skills even the optimizer can't lift fail (genuine quality issue).
 
-### Setting a quality gate
+## Inputs reference
 
-```yaml
-- uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
-  with:
-    fail-threshold: 70
-```
-
-PRs where any skill scores below 70% will fail the check.
-
-When `optimize: true`, the threshold is checked against the **post-optimize achievable score**, not the user's current draft. So a skill the optimizer can lift above the threshold passes the check — the user has a one-click path to merge via `/apply-optimize`. This avoids the contradictory UX where the comment shows a 85% optimized score but the check still blocks at the original 50%.
+| Input | Description | Default |
+|---|---|---|
+| `tessl-token` | Tessl API token. Required for `optimize: true`. [Get one here](https://tessl.io/account/api-keys). | _(required for optimize)_ |
+| `optimize` | Run AI-powered optimization after review | `false` |
+| `inline-suggestions` | Post inline `suggestion` blocks on the PR file diff | `false` |
+| `fail-threshold` | Minimum score (0-100) to pass the check. `0` = never fail. | `0` |
+| `optimize-iterations` | Max optimization iterations (1-10) | `3` |
+| `mode` | `review` (default) or `apply` (used by the `/apply-optimize` job) | `review` |
+| `path` | Root path to search for `SKILL.md` files (for monorepos) | `.` |
+| `comment` | Whether to post the summary comment | `true` |
 
 ## How it works
 
-1. Detects which `SKILL.md` files were changed in the PR
-2. Installs the [Tessl CLI](https://tessl.io)
-3. Runs `tessl skill review` on each changed skill
-4. If `optimize: true` and `tessl-token` is provided, runs optimization and captures suggested improvements
-5. Posts (or updates) a summary comment on the PR with the score, an opportunity-framed headline, a review-details table per dimension, and a CTA pointing at the Files Changed tab
-6. If `inline-suggestions: true`, also posts a single batched PR review with one inline `suggestion` block per diff hunk so authors can click "Commit suggestion" to cherry-pick changes
-7. Optionally fails the check if any score is below the threshold
-8. If a repo collaborator comments `/apply-optimize`, the apply workflow extracts optimized content from the summary comment and commits it to the PR branch
-
-When optimize is enabled but no token is provided, the action runs review-only and includes a prompt in the comment to set up optimization.
-
-## Comment behavior
-
-The action posts a single summary comment per PR. On subsequent pushes, it updates the existing comment in place rather than creating a new one. The summary shows before/after score badges, an opportunity headline, a review-details table with per-dimension feedback (Suggestion column included), and a CTA. The full optimized content is stored as a hidden base64 anchor so `/apply-optimize` can still extract it without cluttering the rendered view.
-
-When `inline-suggestions: true`, each PR run also posts a single batched review on the Files Changed tab. Prior bot suggestion comments from earlier runs are deleted before posting so suggestions don't pile up on the same line across re-runs.
+1. Detects which `SKILL.md` files changed in the PR
+2. Runs `tessl skill review` on each one for a quality score
+3. If `optimize: true`, runs the optimizer to suggest improvements (requires `tessl-token`)
+4. Posts (or updates) a single summary comment per PR with the score and per-dimension review
+5. If `inline-suggestions: true`, also posts a single batched PR review with one inline `suggestion` block per diff hunk; prior bot suggestions are cleaned up before each new run
+6. If `fail-threshold` is set, fails the check when the post-optimize achievable score is below threshold
+7. When a repo collaborator comments `/apply-optimize`, the apply job extracts the optimized content from the summary comment and commits it to the PR branch
 
 ## Local development
 
