@@ -4,7 +4,14 @@ import { getChangedSkillFiles } from './changed-files.ts';
 import { postOrUpdateComment } from './comment.ts';
 import { postInlineSuggestions } from './review.ts';
 import type { SkillReviewResult } from './skill-review.ts';
-import { parseOptimizeIterations, runSkillOptimize, runSkillReview, warmupTessl } from './skill-review.ts';
+import {
+  effectivePass,
+  effectiveScore,
+  parseOptimizeIterations,
+  runSkillOptimize,
+  runSkillReview,
+  warmupTessl,
+} from './skill-review.ts';
 
 const CONCURRENCY_LIMIT = 5;
 
@@ -117,12 +124,16 @@ async function main(): Promise<void> {
     }
   }
 
-  // 6. Check threshold
+  // 6. Check threshold (uses post-optimize score when optimize ran)
   if (threshold > 0) {
-    const failed = results.filter((r) => !r.passed);
+    const failed = results.filter((r) => !effectivePass(r, threshold));
     if (failed.length > 0) {
       const summary = failed
-        .map((r) => `  ${r.skillPath}: ${r.score >= 0 ? `${r.score}%` : 'error'}`)
+        .map((r) => {
+          const score = effectiveScore(r);
+          const note = r.optimize?.optimized ? ' (after optimize)' : '';
+          return `  ${r.skillPath}: ${score >= 0 ? `${score}%${note}` : 'error'}`;
+        })
         .join('\n');
       core.setFailed(
         `${failed.length} skill(s) below threshold of ${threshold}%:\n${summary}`,
