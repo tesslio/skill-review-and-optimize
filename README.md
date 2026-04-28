@@ -22,7 +22,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: tesslio/skill-review-and-optimize@ed1dbae31e43692562bb395bd0dacdc6cb8ec76a
+      - uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
 ```
 
 Any PR that modifies a `SKILL.md` file gets an automated review comment with scores and feedback.
@@ -30,7 +30,7 @@ Any PR that modifies a `SKILL.md` file gets an automated review comment with sco
 ### Review + Optimize (requires Tessl API token)
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@ed1dbae31e43692562bb395bd0dacdc6cb8ec76a
+- uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
   with:
     optimize: true
     tessl-token: ${{ secrets.TESSL_API_TOKEN }}
@@ -62,7 +62,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: tesslio/skill-review-and-optimize@ed1dbae31e43692562bb395bd0dacdc6cb8ec76a
+      - uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
         with:
           mode: apply
 ```
@@ -103,7 +103,7 @@ No CLI install or workspace setup required.
 ### Cherry-picking individual changes (inline suggestions)
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@ed1dbae31e43692562bb395bd0dacdc6cb8ec76a
+- uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
   with:
     optimize: true
     inline-suggestions: true
@@ -115,7 +115,7 @@ When `inline-suggestions: true`, each diff hunk between the user's `SKILL.md` an
 ### Setting a quality gate
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@ed1dbae31e43692562bb395bd0dacdc6cb8ec76a
+- uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
   with:
     fail-threshold: 70
 ```
