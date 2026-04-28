@@ -157,6 +157,31 @@ export interface SkillReviewResult {
   optimize?: OptimizeResult;
 }
 
+/**
+ * The threshold-comparison score for a skill. When optimize ran successfully
+ * the after-score (the achievable post-optimize score) is returned; otherwise
+ * the original review score. This is what we compare against `fail-threshold`.
+ */
+export function effectiveScore(result: SkillReviewResult): number {
+  return result.optimize?.afterScore ?? result.score;
+}
+
+/**
+ * Whether a skill passes the threshold check. Treats optimization as the
+ * achievable target: a skill the optimizer can lift above the threshold is
+ * considered passing, because the user has a one-click path to merge via
+ * `/apply-optimize`. Avoids the contradictory UX where the comment shows a
+ * 85% optimized score but the check still blocks at the 50% before-score.
+ */
+export function effectivePass(
+  result: SkillReviewResult,
+  threshold: number,
+): boolean {
+  if (threshold === 0) return true;
+  if (result.error) return false;
+  return effectiveScore(result) >= threshold;
+}
+
 export async function runSkillReview(
   skillFilePath: string,
   threshold: number,

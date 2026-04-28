@@ -120,7 +120,9 @@ When `inline-suggestions: true`, each diff hunk between the user's `SKILL.md` an
     fail-threshold: 70
 ```
 
-PRs with any skill scoring below 70% will fail the check.
+PRs where any skill scores below 70% will fail the check.
+
+When `optimize: true`, the threshold is checked against the **post-optimize achievable score**, not the user's current draft. So a skill the optimizer can lift above the threshold passes the check — the user has a one-click path to merge via `/apply-optimize`. This avoids the contradictory UX where the comment shows a 85% optimized score but the check still blocks at the original 50%.
 
 ## How it works
 

@@ -1,4 +1,5 @@
 import * as github from '@actions/github';
+import { effectivePass } from './skill-review.ts';
 import type { SkillReviewResult } from './skill-review.ts';
 import { encodeOptimizedAnchor } from './inline-suggestions.ts';
 
@@ -42,12 +43,15 @@ function formatComment(
 ): string {
   const optimizedCount = results.filter((r) => r.optimize?.optimized).length;
   const sections = results.map((result) => {
+    // Emoji reflects the *effective* pass status — i.e. uses the after-score
+    // when optimize ran. Keeps the comment in sync with the threshold check.
+    const passes = effectivePass(result, threshold);
     const emoji =
       result.error
         ? ' ⚠️'
-        : threshold > 0 && result.score >= threshold
+        : threshold > 0 && passes
           ? ' ✅'
-          : threshold > 0 && !result.passed
+          : threshold > 0 && !passes
             ? ' ❌'
             : '';
 

@@ -43,7 +43,14 @@ mock.module('@actions/github', () => ({
 
 // Import after mock registration
 const { getChangedSkillFiles } = await import('./changed-files.ts');
-const { runSkillReview, runSkillOptimize, extractJson, parseOptimizeIterations } = await import('./skill-review.ts');
+const {
+  runSkillReview,
+  runSkillOptimize,
+  extractJson,
+  parseOptimizeIterations,
+  effectiveScore,
+  effectivePass,
+} = await import('./skill-review.ts');
 const { postOrUpdateComment } = await import('./comment.ts');
 const { parseThreshold } = await import('./main.ts');
 const { parseRequestedPath, findOptimizedEntry } = await import('./apply.ts');
@@ -799,6 +806,65 @@ describe('findOptimizedEntry', () => {
 
   test('returns undefined when no path matches', () => {
     expect(findOptimizedEntry(optimized, 'unknown/SKILL.md')).toBeUndefined();
+  });
+});
+
+describe('effectiveScore', () => {
+  test('returns review score when no optimize ran', () => {
+    expect(effectiveScore({
+      skillPath: 'a/SKILL.md', passed: true, score: 60, output: '',
+    })).toBe(60);
+  });
+
+  test('returns afterScore when optimize ran (even if no changes needed)', () => {
+    expect(effectiveScore({
+      skillPath: 'a/SKILL.md', passed: true, score: 60, output: '',
+      optimize: { optimized: false, beforeScore: 95, afterScore: 95 },
+    })).toBe(95);
+  });
+
+  test('returns afterScore (the achievable target) when optimize improved', () => {
+    expect(effectiveScore({
+      skillPath: 'a/SKILL.md', passed: false, score: 50, output: '',
+      optimize: { optimized: true, beforeScore: 50, afterScore: 85, optimizedContent: 'x' },
+    })).toBe(85);
+  });
+});
+
+describe('effectivePass', () => {
+  test('threshold 0 always passes', () => {
+    expect(effectivePass({
+      skillPath: 'a', passed: false, score: 0, output: '',
+    }, 0)).toBe(true);
+  });
+
+  test('error result always fails', () => {
+    expect(effectivePass({
+      skillPath: 'a', passed: false, score: -1, output: '', error: 'boom',
+    }, 70)).toBe(false);
+  });
+
+  test('passes when after-score reaches threshold even though before-score did not', () => {
+    expect(effectivePass({
+      skillPath: 'a', passed: false, score: 50, output: '',
+      optimize: { optimized: true, beforeScore: 50, afterScore: 85, optimizedContent: 'x' },
+    }, 70)).toBe(true);
+  });
+
+  test('fails when even the after-score is below threshold', () => {
+    expect(effectivePass({
+      skillPath: 'a', passed: false, score: 50, output: '',
+      optimize: { optimized: true, beforeScore: 50, afterScore: 65, optimizedContent: 'x' },
+    }, 70)).toBe(false);
+  });
+
+  test('falls back to before-score when no optimize', () => {
+    expect(effectivePass({
+      skillPath: 'a', passed: false, score: 50, output: '',
+    }, 70)).toBe(false);
+    expect(effectivePass({
+      skillPath: 'a', passed: true, score: 80, output: '',
+    }, 70)).toBe(true);
   });
 });
 
