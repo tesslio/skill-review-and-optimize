@@ -12,6 +12,7 @@ import {
   runSkillReview,
   warmupTessl,
 } from './skill-review.ts';
+import { isSuggestionAcceptanceCommit } from './suggestion-detect.ts';
 
 const CONCURRENCY_LIMIT = 5;
 
@@ -22,6 +23,17 @@ async function main(): Promise<void> {
   const optimizeEnabled = process.env.INPUT_OPTIMIZE === 'true';
   const maxIterations = parseOptimizeIterations(process.env.INPUT_OPTIMIZE_ITERATIONS);
   const inlineSuggestionsEnabled = process.env.INPUT_INLINE_SUGGESTIONS === 'true';
+  const reReviewOnSuggestion =
+    process.env.INPUT_RE_REVIEW_ON_SUGGESTION_ACCEPTANCE !== 'false';
+
+  // 0. Skip when the head commit was produced by accepting an inline
+  // `suggestion` and the consumer opted out of re-reviewing those.
+  if (!reReviewOnSuggestion && (await isSuggestionAcceptanceCommit())) {
+    console.log(
+      'Skipping review: head commit is a GitHub suggestion-acceptance commit and re-review-on-suggestion-acceptance=false.',
+    );
+    return;
+  }
 
   // 1. Detect changed SKILL.md files
   const changedFiles = await getChangedSkillFiles(rootPath);
