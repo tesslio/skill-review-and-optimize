@@ -23,12 +23,39 @@ const updateCommentMock = mock(() => Promise.resolve());
 const listCommentsMock = mock(() =>
   Promise.resolve({ data: [] as Array<{ id: number; body: string }> }),
 );
+interface CommitResponseData {
+  data: {
+    commit: {
+      committer: { name?: string; email?: string } | null;
+      message: string;
+      verification?: { verified: boolean };
+    };
+  };
+}
+const getCommitMock = mock(
+  () =>
+    Promise.resolve({
+      data: {
+        commit: {
+          committer: { name: '', email: '' } as { name?: string; email?: string } | null,
+          message: '',
+          verification: undefined as { verified: boolean } | undefined,
+        },
+      },
+    }) as Promise<CommitResponseData>,
+);
+
+const githubMockContext = {
+  payload: {
+    pull_request: { number: 42, head: { sha: 'head-sha-123' } } as
+      | { number: number; head?: { sha: string } }
+      | undefined,
+  },
+  repo: { owner: 'test-owner', repo: 'test-repo' },
+};
 
 mock.module('@actions/github', () => ({
-  context: {
-    payload: { pull_request: { number: 42 } },
-    repo: { owner: 'test-owner', repo: 'test-repo' },
-  },
+  context: githubMockContext,
   getOctokit: () => ({
     rest: {
       pulls: { listFiles: listFilesMock },
@@ -37,6 +64,7 @@ mock.module('@actions/github', () => ({
         createComment: createCommentMock,
         updateComment: updateCommentMock,
       },
+      repos: { getCommit: getCommitMock },
     },
   }),
 }));
@@ -62,6 +90,7 @@ const {
   parsePatchRanges,
   filterHunksToPatchRanges,
 } = await import('./inline-suggestions.ts');
+const { isSuggestionAcceptanceCommit } = await import('./suggestion-detect.ts');
 
 // ---------------------------------------------------------------------------
 // 1. parseThreshold
@@ -1235,5 +1264,133 @@ describe('runSkillOptimize', () => {
     expect(writeMock).toHaveBeenCalled();
     const lastWriteArgs = (writeMock.mock.calls[writeMock.mock.calls.length - 1] as unknown[]);
     expect(lastWriteArgs[1]).toBe(originalContent);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. isSuggestionAcceptanceCommit
+// ---------------------------------------------------------------------------
+
+describe('isSuggestionAcceptanceCommit', () => {
+  const originalToken = process.env.GITHUB_TOKEN;
+  const originalPullRequest = githubMockContext.payload.pull_request;
+
+  beforeEach(() => {
+    process.env.GITHUB_TOKEN = 'fake-token';
+    githubMockContext.payload.pull_request = { number: 42, head: { sha: 'head-sha-123' } };
+    getCommitMock.mockClear();
+  });
+
+  afterEach(() => {
+    if (originalToken !== undefined) {
+      process.env.GITHUB_TOKEN = originalToken;
+    } else {
+      delete process.env.GITHUB_TOKEN;
+    }
+    githubMockContext.payload.pull_request = originalPullRequest;
+  });
+
+  const webFlowCommit = (message: string, verified = true) => ({
+    data: {
+      commit: {
+        committer: { name: 'GitHub', email: 'noreply@github.com' },
+        message,
+        verification: { verified },
+      },
+    },
+  });
+
+  test('returns true for batch suggestion-accept (Apply suggestions from code review)', async () => {
+    getCommitMock.mockResolvedValueOnce(
+      webFlowCommit('Apply suggestions from code review\n\nCo-authored-by: foo <foo@example.com>'),
+    );
+    expect(await isSuggestionAcceptanceCommit()).toBe(true);
+  });
+
+  test('returns true for single suggestion-accept (Update <path> + Co-authored-by trailer)', async () => {
+    // Real-world payload from clicking "Commit suggestion" once.
+    getCommitMock.mockResolvedValueOnce(
+      webFlowCommit(
+        'Update api-design/SKILL.md\n\nCo-authored-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>',
+      ),
+    );
+    expect(await isSuggestionAcceptanceCommit()).toBe(true);
+  });
+
+  test('returns false for plain web edit (Update <path> without Co-authored-by trailer)', async () => {
+    // The "Edit this file" pencil button uses the same Update <path> subject
+    // but without a co-author — humans editing through the web UI should
+    // still trigger a fresh review.
+    getCommitMock.mockResolvedValueOnce(webFlowCommit('Update api-design/SKILL.md'));
+    expect(await isSuggestionAcceptanceCommit()).toBe(false);
+  });
+
+  test('returns false when commit has web-flow identity but is not GitHub-signed (forged committer)', async () => {
+    // A PR author can push a commit with GIT_COMMITTER_NAME='GitHub' and
+    // GIT_COMMITTER_EMAIL='noreply@github.com' to forge web-flow identity.
+    // The verification check ensures only GitHub-signed commits match.
+    getCommitMock.mockResolvedValueOnce(webFlowCommit('Apply suggestions from code review', false));
+    expect(await isSuggestionAcceptanceCommit()).toBe(false);
+  });
+
+  test('returns false when verification is missing from response', async () => {
+    getCommitMock.mockResolvedValueOnce({
+      data: {
+        commit: {
+          committer: { name: 'GitHub', email: 'noreply@github.com' },
+          message: 'Apply suggestions from code review',
+          // no verification field
+        },
+      },
+    });
+    expect(await isSuggestionAcceptanceCommit()).toBe(false);
+  });
+
+  test('returns false for non-web-flow committer even with suggestion-like message', async () => {
+    // The /apply-optimize bot commits as tessl-skill-review[bot] — the
+    // committer check prevents those from being skipped.
+    getCommitMock.mockResolvedValueOnce({
+      data: {
+        commit: {
+          committer: {
+            name: 'tessl-skill-review[bot]',
+            email: 'skill-review[bot]@users.noreply.github.com',
+          },
+          message: 'Apply suggestions from code review',
+          verification: { verified: true },
+        },
+      },
+    });
+    expect(await isSuggestionAcceptanceCommit()).toBe(false);
+  });
+
+  test('returns false when committer is null', async () => {
+    getCommitMock.mockResolvedValueOnce({
+      data: {
+        commit: {
+          committer: null,
+          message: 'Apply suggestions from code review',
+          verification: { verified: true },
+        },
+      },
+    });
+    expect(await isSuggestionAcceptanceCommit()).toBe(false);
+  });
+
+  test('returns false when GITHUB_TOKEN is missing', async () => {
+    delete process.env.GITHUB_TOKEN;
+    expect(await isSuggestionAcceptanceCommit()).toBe(false);
+    expect(getCommitMock).not.toHaveBeenCalled();
+  });
+
+  test('returns false when PR head SHA is missing', async () => {
+    githubMockContext.payload.pull_request = undefined;
+    expect(await isSuggestionAcceptanceCommit()).toBe(false);
+    expect(getCommitMock).not.toHaveBeenCalled();
+  });
+
+  test('returns false when getCommit throws (soft-fail)', async () => {
+    getCommitMock.mockImplementationOnce(() => Promise.reject(new Error('API down')));
+    expect(await isSuggestionAcceptanceCommit()).toBe(false);
   });
 });

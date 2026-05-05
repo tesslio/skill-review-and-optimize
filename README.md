@@ -91,6 +91,20 @@ When `optimize: true`, the threshold is checked against the **post-optimize achi
 | `mode` | `review` (default) or `apply` (used by the `/apply-optimize` job) | `review` |
 | `path` | Root path to search for `SKILL.md` files (for monorepos) | `.` |
 | `comment` | Whether to post the summary comment | `true` |
+| `re-review-on-suggestion-acceptance` | Re-run review after a `Commit suggestion` accept. Set `false` to skip those runs and keep the original review comment. | `true` |
+
+## Optional: skip re-review when a suggestion is accepted
+
+With `inline-suggestions: true`, every `Commit suggestion` click pushes a new commit and re-fires the workflow — by default the action re-reviews and posts a fresh summary. Set `re-review-on-suggestion-acceptance: false` to detect those commits (GitHub-signed web-flow committer + either `Apply suggestions from code review` for batch accepts or `Update <path>` with a `Co-authored-by:` trailer for single accepts) and exit early, leaving the original review in place. Plain web edits (the pencil "Edit this file" button), `/apply-optimize`, and ordinary human pushes still trigger a review.
+
+```yaml
+- uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
+  with:
+    optimize: true
+    inline-suggestions: true
+    re-review-on-suggestion-acceptance: false
+    tessl-token: ${{ secrets.TESSL_API_TOKEN }}
+```
 
 ## How it works
 

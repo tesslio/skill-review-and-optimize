@@ -25,6 +25,9 @@ inputs:
   inline-suggestions:
     description: 'Post optimization changes as inline GitHub `suggestion` blocks on the PR diff (in addition to the summary comment). Lets authors cherry-pick individual changes.'
     default: 'false'
+  re-review-on-suggestion-acceptance:
+    description: 'Re-run review when a commit comes from accepting a GitHub inline `suggestion` (Commit suggestion / Apply suggestions from code review). Set to "false" to skip those runs — the original review comment is left in place. Default "true" preserves prior behavior.'
+    default: 'true'
   tessl-token:
     description: 'Tessl API token for optimize mode. Get one at https://tessl.io/account/api-keys'
     required: false
@@ -47,6 +50,7 @@ runs:
         INPUT_OPTIMIZE: ${{ inputs.optimize }}
         INPUT_OPTIMIZE_ITERATIONS: ${{ inputs.optimize-iterations }}
         INPUT_INLINE_SUGGESTIONS: ${{ inputs.inline-suggestions }}
+        INPUT_RE_REVIEW_ON_SUGGESTION_ACCEPTANCE: ${{ inputs.re-review-on-suggestion-acceptance }}
         TESSL_API_TOKEN: ${{ inputs.tessl-token }}
         TESSL_TOKEN: ${{ inputs.tessl-token }}
         GITHUB_TOKEN: ${{ github.token }}
