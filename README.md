@@ -31,7 +31,7 @@ Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed
          contents: read
        steps:
          - uses: actions/checkout@v4
-         - uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
+         - uses: tesslio/skill-review-and-optimize@7b2383f98ce4d2ba281a9a1d573a9f82390ad7db
            with:
              optimize: true
              inline-suggestions: true
@@ -51,7 +51,7 @@ Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed
          - uses: actions/checkout@v4
            with:
              fetch-depth: 0
-         - uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
+         - uses: tesslio/skill-review-and-optimize@7b2383f98ce4d2ba281a9a1d573a9f82390ad7db
            with:
              mode: apply
    ```
@@ -69,7 +69,7 @@ That's it. Open a PR that changes a `SKILL.md` and the bot will comment.
 Add `fail-threshold` to the `review` job to fail the check when a skill scores below your minimum:
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
+- uses: tesslio/skill-review-and-optimize@7b2383f98ce4d2ba281a9a1d573a9f82390ad7db
   with:
     optimize: true
     inline-suggestions: true
@@ -98,7 +98,7 @@ When `optimize: true`, the threshold is checked against the **post-optimize achi
 With `inline-suggestions: true`, every `Commit suggestion` click pushes a new commit and re-fires the workflow — by default the action re-reviews and posts a fresh summary. Set `re-review-on-suggestion-acceptance: false` to detect those commits (GitHub-signed web-flow committer + either `Apply suggestions from code review` for batch accepts or `Update <path>` with a `Co-authored-by:` trailer for single accepts) and exit early, leaving the original review in place. Plain web edits (the pencil "Edit this file" button), `/apply-optimize`, and ordinary human pushes still trigger a review.
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
+- uses: tesslio/skill-review-and-optimize@7b2383f98ce4d2ba281a9a1d573a9f82390ad7db
   with:
     optimize: true
     inline-suggestions: true
