@@ -10,10 +10,23 @@ import * as github from '@actions/github';
 const WEB_FLOW_NAME = 'GitHub';
 const WEB_FLOW_EMAIL = 'noreply@github.com';
 
-const SUGGESTION_MESSAGE_PATTERNS = [
-  /^Apply suggestions? from code review\b/i,
-  /^Apply suggestion\b/i,
-];
+/**
+ * Two distinct message shapes are produced by the GitHub web UI:
+ *
+ * - **Batch** (`Commit suggestions` after batching multiple via
+ *   `Add suggestion to batch`): subject `Apply suggestions from code review`.
+ * - **Single** (`Commit suggestion` on one inline block): subject
+ *   `Update <filepath>` *with* a `Co-authored-by:` trailer attributing the
+ *   suggestion's author. The trailer is what distinguishes a suggestion
+ *   accept from a plain web edit (the pencil "Edit this file" button), which
+ *   produces the same `Update <filepath>` subject without a co-author.
+ */
+function isSuggestionMessage(message: string): boolean {
+  if (/^Apply suggestions? from code review\b/i.test(message)) return true;
+  const isUpdateSubject = /^Update [^\n]+/.test(message);
+  const hasCoAuthor = /\r?\nCo-authored-by:/i.test(message);
+  return isUpdateSubject && hasCoAuthor;
+}
 
 /**
  * Returns true when the PR head commit looks like an accepted inline
@@ -58,5 +71,5 @@ export async function isSuggestionAcceptanceCommit(): Promise<boolean> {
     data.commit.verification?.verified === true;
   if (!isWebFlow) return false;
 
-  return SUGGESTION_MESSAGE_PATTERNS.some((re) => re.test(message));
+  return isSuggestionMessage(message);
 }

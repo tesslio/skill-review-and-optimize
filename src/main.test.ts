@@ -1300,20 +1300,28 @@ describe('isSuggestionAcceptanceCommit', () => {
     },
   });
 
-  test('returns true for web-flow committer with batch suggestion message', async () => {
+  test('returns true for batch suggestion-accept (Apply suggestions from code review)', async () => {
     getCommitMock.mockResolvedValueOnce(
       webFlowCommit('Apply suggestions from code review\n\nCo-authored-by: foo <foo@example.com>'),
     );
     expect(await isSuggestionAcceptanceCommit()).toBe(true);
   });
 
-  test('returns true for web-flow committer with single-suggestion message', async () => {
-    getCommitMock.mockResolvedValueOnce(webFlowCommit('Apply suggestion'));
+  test('returns true for single suggestion-accept (Update <path> + Co-authored-by trailer)', async () => {
+    // Real-world payload from clicking "Commit suggestion" once.
+    getCommitMock.mockResolvedValueOnce(
+      webFlowCommit(
+        'Update api-design/SKILL.md\n\nCo-authored-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>',
+      ),
+    );
     expect(await isSuggestionAcceptanceCommit()).toBe(true);
   });
 
-  test('returns false for web-flow committer with non-suggestion message (e.g. plain web edit)', async () => {
-    getCommitMock.mockResolvedValueOnce(webFlowCommit('Update SKILL.md'));
+  test('returns false for plain web edit (Update <path> without Co-authored-by trailer)', async () => {
+    // The "Edit this file" pencil button uses the same Update <path> subject
+    // but without a co-author — humans editing through the web UI should
+    // still trigger a fresh review.
+    getCommitMock.mockResolvedValueOnce(webFlowCommit('Update api-design/SKILL.md'));
     expect(await isSuggestionAcceptanceCommit()).toBe(false);
   });
 

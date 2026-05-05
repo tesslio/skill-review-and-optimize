@@ -95,7 +95,7 @@ When `optimize: true`, the threshold is checked against the **post-optimize achi
 
 ## Optional: skip re-review when a suggestion is accepted
 
-With `inline-suggestions: true`, every `Commit suggestion` click pushes a new commit and re-fires the workflow — by default the action re-reviews and posts a fresh summary. Set `re-review-on-suggestion-acceptance: false` to detect those commits (web-flow committer + `Apply suggestion(s) from code review` message) and exit early, leaving the original review in place. The batch `/apply-optimize` flow and ordinary human pushes still trigger a review.
+With `inline-suggestions: true`, every `Commit suggestion` click pushes a new commit and re-fires the workflow — by default the action re-reviews and posts a fresh summary. Set `re-review-on-suggestion-acceptance: false` to detect those commits (GitHub-signed web-flow committer + either `Apply suggestions from code review` for batch accepts or `Update <path>` with a `Co-authored-by:` trailer for single accepts) and exit early, leaving the original review in place. Plain web edits (the pencil "Edit this file" button), `/apply-optimize`, and ordinary human pushes still trigger a review.
 
 ```yaml
 - uses: tesslio/skill-review-and-optimize@e7b9c063fc4192045558f5919784b6f7c16969ea
