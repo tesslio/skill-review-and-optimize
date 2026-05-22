@@ -727,7 +727,7 @@ describe('postOrUpdateComment', () => {
     expect(body).not.toContain('- suggestion one');
   });
 
-  test('comment shows no optimization needed', async () => {
+  test('comment shows no further improvements available', async () => {
     listCommentsMock.mockResolvedValueOnce({ data: [] });
 
     await postOrUpdateComment(
@@ -747,7 +747,7 @@ describe('postOrUpdateComment', () => {
 
     const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     const body = callArgs.body as string;
-    expect(body).toContain('no optimization needed');
+    expect(body).toContain('no further improvements available');
   });
 
   test('no CTA when optimize not skipped', async () => {
