@@ -750,6 +750,38 @@ describe('postOrUpdateComment', () => {
     expect(body).toContain('no further improvements available');
   });
 
+  test('regressed optimize shows the affirming message, never the lower after-score', async () => {
+    listCommentsMock.mockResolvedValueOnce({ data: [] });
+
+    await postOrUpdateComment(
+      [{
+        skillPath: 'a/SKILL.md',
+        passed: true,
+        score: 80,
+        output: 'review details',
+        optimize: {
+          optimized: false,
+          beforeScore: 80,
+          afterScore: 60,
+        },
+      }],
+      0,
+    );
+
+    const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+    const body = callArgs.body as string;
+
+    expect(body).toContain('no further improvements available');
+    // Original score badge is rendered.
+    expect(body).toContain('-80%25-');
+    // The regressed after-score must not appear anywhere — no badge, no delta.
+    expect(body).not.toContain('-60%25-');
+    expect(body).not.toContain('→');
+    // No CTA or hidden anchor for a non-recommendable run.
+    expect(body).not.toContain('/apply-optimize');
+    expect(body).not.toContain('tessl-optimized-b64');
+  });
+
   test('no CTA when optimize not skipped', async () => {
     listCommentsMock.mockResolvedValueOnce({ data: [] });
 
@@ -845,11 +877,18 @@ describe('effectiveScore', () => {
     })).toBe(60);
   });
 
-  test('returns afterScore when optimize ran (even if no changes needed)', () => {
+  test('returns original score when optimize ran but produced no improvement', () => {
     expect(effectiveScore({
-      skillPath: 'a/SKILL.md', passed: true, score: 60, output: '',
+      skillPath: 'a/SKILL.md', passed: true, score: 95, output: '',
       optimize: { optimized: false, beforeScore: 95, afterScore: 95 },
     })).toBe(95);
+  });
+
+  test('returns original score (not regressed afterScore) when optimize regressed', () => {
+    expect(effectiveScore({
+      skillPath: 'a/SKILL.md', passed: true, score: 80, output: '',
+      optimize: { optimized: false, beforeScore: 80, afterScore: 60 },
+    })).toBe(80);
   });
 
   test('returns afterScore (the achievable target) when optimize improved', () => {
@@ -893,6 +932,13 @@ describe('effectivePass', () => {
     }, 70)).toBe(false);
     expect(effectivePass({
       skillPath: 'a', passed: true, score: 80, output: '',
+    }, 70)).toBe(true);
+  });
+
+  test('a regressed optimize does not drag a passing skill below threshold', () => {
+    expect(effectivePass({
+      skillPath: 'a', passed: true, score: 80, output: '',
+      optimize: { optimized: false, beforeScore: 80, afterScore: 60 },
     }, 70)).toBe(true);
   });
 });
@@ -1220,6 +1266,38 @@ describe('runSkillOptimize', () => {
     expect(result.beforeScore).toBe(95);
     expect(result.afterScore).toBe(95);
     expect(result.optimizedContent).toBeUndefined();
+  });
+
+  test('regression: content changed but post-optimize score dropped — not recommended', async () => {
+    const originalContent = '---\nname: test\n---\nOriginal';
+    const regressedContent = '---\nname: test\n---\nWorse rewrite';
+    let readCount = 0;
+
+    // @ts-expect-error mock assignment
+    Bun.file = mock(() => ({
+      text: mock(() => {
+        readCount++;
+        return Promise.resolve(readCount === 1 ? originalContent : regressedContent);
+      }),
+    }));
+    // @ts-ignore mock assignment
+    Bun.write = mock(() => Promise.resolve(0));
+
+    // Follow-up review returns a lower normalized score than beforeScore (80).
+    const jsonOutput = JSON.stringify({
+      contentJudge: { normalizedScore: 0.60 },
+    });
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
+
+    const result = await runSkillOptimize('skills/test/SKILL.md', 80, 3);
+    expect(result.optimized).toBe(false);
+    expect(result.beforeScore).toBe(80);
+    expect(result.afterScore).toBe(60);
+    // No diff/anchor content leaks out when the run regressed.
+    expect(result.optimizedContent).toBeUndefined();
+    expect(result.originalContent).toBeUndefined();
+    expect(result.error).toBeUndefined();
   });
 
   test('CLI failure returns error', async () => {
