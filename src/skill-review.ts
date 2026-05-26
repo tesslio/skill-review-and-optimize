@@ -158,12 +158,17 @@ export interface SkillReviewResult {
 }
 
 /**
- * The threshold-comparison score for a skill. When optimize ran successfully
- * the after-score (the achievable post-optimize score) is returned; otherwise
- * the original review score. This is what we compare against `fail-threshold`.
+ * The threshold-comparison score for a skill. When optimize produced a
+ * recommendable improvement we use the after-score (the achievable
+ * post-optimize score); otherwise the original review score. A regressing
+ * optimize run is treated as "keep original", so its lower after-score must
+ * not drag the threshold check below the original.
  */
 export function effectiveScore(result: SkillReviewResult): number {
-  return result.optimize?.afterScore ?? result.score;
+  if (result.optimize?.optimized) {
+    return result.optimize.afterScore;
+  }
+  return result.score;
 }
 
 /**
@@ -346,11 +351,18 @@ export async function runSkillOptimize(
   // Restore original file (suggestion-only mode)
   await Bun.write(skillFilePath, originalContent);
 
+  // Only treat the run as "optimized" when it produced a score improvement.
+  // A run that changes content but doesn't beat the before-score is treated
+  // as no-improvement-available downstream: we keep the user's version, omit
+  // the diff/inline-suggestions, and the comment falls into the affirming
+  // "no further improvements available" branch.
+  const optimized = contentChanged && afterScore > beforeScore;
+
   return {
-    optimized: contentChanged,
+    optimized,
     beforeScore,
     afterScore,
-    optimizedContent: contentChanged ? newContent : undefined,
-    originalContent: contentChanged ? originalContent : undefined,
+    optimizedContent: optimized ? newContent : undefined,
+    originalContent: optimized ? originalContent : undefined,
   };
 }

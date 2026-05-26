@@ -93,9 +93,11 @@ function formatComment(
       // content from the comment body without cluttering the rendered view.
       body += `\n${encodeOptimizedAnchor(result.skillPath, result.optimize.optimizedContent ?? '')}\n`;
     } else if (result.optimize && !result.optimize.optimized && !result.optimize.error) {
-      // Optimize ran but no changes needed
+      // Optimize ran but didn't produce a recommendable improvement — either
+      // it left the file alone, or it tried and the result regressed. In both
+      // cases we keep the user's version and report it as good-as-is.
       const badge = result.score >= 0 ? ` ${scoreBadge(result.score)}${emoji}` : '';
-      body = `${badge} *(no optimization needed)*\n\n<details>\n<summary>Review Details</summary>\n\n${result.output}\n\n</details>\n`;
+      body = `${badge} *(no further improvements available — keeping your version)*\n\n<details>\n<summary>Review Details</summary>\n\n${result.output}\n\n</details>\n`;
     } else {
       // Standard review-only display
       const badge = result.score >= 0 ? ` ${scoreBadge(result.score)}${emoji}` : '';
