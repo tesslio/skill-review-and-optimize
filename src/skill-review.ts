@@ -2,7 +2,10 @@ import { dirname, join, resolve } from 'node:path';
 
 /** Prefer the CLI installed by setup-tessl, falling back to the package binary for local runs. */
 function tesslBin(): string {
-  return process.env.TESSL_BIN ?? resolve(import.meta.dir, '..', 'node_modules', '.bin', 'tessl');
+  const envBin = process.env.TESSL_BIN?.trim();
+  return envBin && envBin.length > 0
+    ? envBin
+    : resolve(import.meta.dir, '..', 'node_modules', '.bin', 'tessl');
 }
 
 /**
