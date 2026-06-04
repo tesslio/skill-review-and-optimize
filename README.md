@@ -73,11 +73,15 @@ Add `fail-threshold` to the `review` job to fail the check when a skill scores b
   with:
     optimize: true
     inline-suggestions: true
+    cli-version: 0.73.0
     fail-threshold: 70
     tessl-token: ${{ secrets.TESSL_API_TOKEN }}
 ```
 
 When `optimize: true`, the threshold is checked against the **post-optimize achievable score**. So skills the optimizer can lift above the threshold pass the check — the user has a one-click `/apply-optimize` path to merge. Skills even the optimizer can't lift fail (genuine quality issue).
+
+Omit `cli-version` to keep using the latest Tessl CLI. Set it to a specific version when you need reproducible runs or a short rollout delay for new CLI releases.
+The CLI is only installed for `mode: review`; `/apply-optimize` does not need the Tessl CLI.
 
 ## Inputs reference
 
@@ -88,6 +92,7 @@ When `optimize: true`, the threshold is checked against the **post-optimize achi
 | `inline-suggestions` | Post inline `suggestion` blocks on the PR file diff | `false` |
 | `fail-threshold` | Minimum score (0-100) to pass the check. `0` = never fail. | `0` |
 | `optimize-iterations` | Max optimization iterations (1-10) | `3` |
+| `cli-version` | Tessl CLI version to install, for example `0.73.0` or `latest` | `latest` |
 | `mode` | `review` (default) or `apply` (used by the `/apply-optimize` job) | `review` |
 | `path` | Root path to search for `SKILL.md` files (for monorepos) | `.` |
 | `comment` | Whether to post the summary comment | `true` |

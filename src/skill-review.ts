@@ -1,7 +1,9 @@
 import { dirname, join, resolve } from 'node:path';
 
-/** Resolve the tessl CLI binary from the action's own node_modules */
-const TESSL_BIN = resolve(import.meta.dir, '..', 'node_modules', '.bin', 'tessl');
+/** Prefer the CLI installed by setup-tessl, falling back to the package binary for local runs. */
+function tesslBin(): string {
+  return process.env.TESSL_BIN ?? resolve(import.meta.dir, '..', 'node_modules', '.bin', 'tessl');
+}
 
 /**
  * Run a single sequential `tessl --version` to force the binary's first-run
@@ -15,7 +17,7 @@ const TESSL_BIN = resolve(import.meta.dir, '..', 'node_modules', '.bin', 'tessl'
  */
 export async function warmupTessl(): Promise<void> {
   try {
-    const proc = Bun.spawn([TESSL_BIN, '--version'], {
+    const proc = Bun.spawn([tesslBin(), '--version'], {
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -193,7 +195,7 @@ export async function runSkillReview(
 ): Promise<SkillReviewResult> {
   const skillDir = dirname(skillFilePath);
 
-  const proc = Bun.spawn([TESSL_BIN, 'skill', 'review', '--json', skillDir], {
+  const proc = Bun.spawn([tesslBin(), 'skill', 'review', '--json', skillDir], {
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -291,7 +293,7 @@ export async function runSkillOptimize(
 
   const proc = Bun.spawn(
     [
-      TESSL_BIN, 'skill', 'review',
+      tesslBin(), 'skill', 'review',
       '--optimize', '--yes',
       '--max-iterations', String(maxIterations),
       skillDir,
@@ -328,7 +330,7 @@ export async function runSkillOptimize(
   let afterScore = beforeScore;
   if (contentChanged) {
     const reviewProc = Bun.spawn(
-      [TESSL_BIN, 'skill', 'review', '--json', skillDir],
+      [tesslBin(), 'skill', 'review', '--json', skillDir],
       { stdout: 'pipe', stderr: 'pipe' },
     );
     const reviewStdout = await new Response(reviewProc.stdout).text();
