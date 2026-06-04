@@ -318,6 +318,69 @@ describe('runSkillReview', () => {
     expect(result.output).toContain('Good skill definition.');
   });
 
+  test('uses TESSL_BIN from setup-tessl when provided', async () => {
+    const originalTesslBin = process.env.TESSL_BIN;
+    const jsonOutput = JSON.stringify({
+      contentJudge: {
+        normalizedScore: 0.85,
+        evaluation: 'Good skill definition.',
+      },
+    });
+    const spawnMock = makeMockSpawn(jsonOutput, '', 0);
+
+    try {
+      process.env.TESSL_BIN = '/runner/tool-cache/tessl/0.73.0/linux-x64/tessl';
+      // @ts-expect-error mock assignment
+      Bun.spawn = spawnMock;
+
+      await runSkillReview('skills/test/SKILL.md', 70);
+
+      const firstCall = spawnMock.mock.calls[0] as unknown[];
+      expect(firstCall[0]).toEqual([
+        '/runner/tool-cache/tessl/0.73.0/linux-x64/tessl',
+        'skill',
+        'review',
+        '--json',
+        'skills/test',
+      ]);
+    } finally {
+      if (originalTesslBin !== undefined) {
+        process.env.TESSL_BIN = originalTesslBin;
+      } else {
+        delete process.env.TESSL_BIN;
+      }
+    }
+  });
+
+  test('falls back to package binary when TESSL_BIN is blank', async () => {
+    const originalTesslBin = process.env.TESSL_BIN;
+    const jsonOutput = JSON.stringify({
+      contentJudge: {
+        normalizedScore: 0.85,
+        evaluation: 'Good skill definition.',
+      },
+    });
+    const spawnMock = makeMockSpawn(jsonOutput, '', 0);
+
+    try {
+      process.env.TESSL_BIN = '   ';
+      // @ts-expect-error mock assignment
+      Bun.spawn = spawnMock;
+
+      await runSkillReview('skills/test/SKILL.md', 70);
+
+      const firstCall = spawnMock.mock.calls[0] as unknown[];
+      const command = firstCall[0] as string[];
+      expect(command[0]).toEndWith('node_modules/.bin/tessl');
+    } finally {
+      if (originalTesslBin !== undefined) {
+        process.env.TESSL_BIN = originalTesslBin;
+      } else {
+        delete process.env.TESSL_BIN;
+      }
+    }
+  });
+
   test('CLI failure (non-zero exit)', async () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('', 'Command not found', 1);

@@ -22,6 +22,9 @@ inputs:
   optimize-iterations:
     description: 'Max optimization iterations (1-10)'
     default: '3'
+  cli-version:
+    description: 'Tessl CLI version to install (for example "0.73.0", or "latest")'
+    default: 'latest'
   inline-suggestions:
     description: 'Post optimization changes as inline GitHub `suggestion` blocks on the PR diff (in addition to the summary comment). Lets authors cherry-pick individual changes.'
     default: 'false'
@@ -34,7 +37,11 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: tesslio/setup-tessl@7b21cb04671af0bec4807758467f27c17d217172 # v1
+    - id: setup-tessl
+      if: inputs.mode == 'review'
+      uses: tesslio/setup-tessl@7b21cb04671af0bec4807758467f27c17d217172 # v1
+      with:
+        version: ${{ inputs.cli-version }}
     - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
     - run: bun install --production --frozen-lockfile
       shell: bash
@@ -51,6 +58,7 @@ runs:
         INPUT_OPTIMIZE_ITERATIONS: ${{ inputs.optimize-iterations }}
         INPUT_INLINE_SUGGESTIONS: ${{ inputs.inline-suggestions }}
         INPUT_RE_REVIEW_ON_SUGGESTION_ACCEPTANCE: ${{ inputs.re-review-on-suggestion-acceptance }}
+        TESSL_BIN: ${{ steps.setup-tessl.outputs.path }}
         TESSL_API_TOKEN: ${{ inputs.tessl-token }}
         TESSL_TOKEN: ${{ inputs.tessl-token }}
         GITHUB_TOKEN: ${{ github.token }}
