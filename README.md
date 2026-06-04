@@ -58,6 +58,18 @@ Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed
 
 That's it. Open a PR that changes a `SKILL.md` and the bot will comment.
 
+To pin the Tessl CLI version used for review runs, add `cli-version` to the review step:
+
+```yaml
+- uses: tesslio/skill-review-and-optimize@7b2383f98ce4d2ba281a9a1d573a9f82390ad7db
+  with:
+    cli-version: 0.73.0
+```
+
+Omit `cli-version` to keep using the latest Tessl CLI. Set it to a specific version when you need reproducible runs or a short rollout delay for new CLI releases.
+
+The CLI is only installed for `mode: review`; `/apply-optimize` does not need the Tessl CLI.
+
 > ⚠️ **First-time setup gotcha — `/apply-optimize` won't work on the PR that introduces this workflow.** GitHub reads `issue_comment` workflows from your **default branch only**, never from a PR branch. So the very first time you add this file, you need to land it on `main` (typically by merging the PR that added it) before `/apply-optimize` fires on any PR. After that, it works on every future PR. The review side (the summary comment + inline suggestions) is unaffected — it works from the PR branch on the very first run.
 >
 > **The pinned SHA** (`@e7b9c0…`) keeps your workflow reproducible. Bump it from the [tags page](https://github.com/tesslio/skill-review-and-optimize/tags) when you intentionally upgrade.
@@ -73,17 +85,11 @@ Add `fail-threshold` to the `review` job to fail the check when a skill scores b
   with:
     optimize: true
     inline-suggestions: true
-    cli-version: 0.73.0
     fail-threshold: 70
     tessl-token: ${{ secrets.TESSL_API_TOKEN }}
 ```
 
 When `optimize: true`, the threshold is checked against the **post-optimize achievable score**. So skills the optimizer can lift above the threshold pass the check — the user has a one-click `/apply-optimize` path to merge. Skills even the optimizer can't lift fail (genuine quality issue).
-
-Omit `cli-version` to keep using the latest Tessl CLI. Set it to a specific version when you need reproducible runs or a short rollout delay for new CLI releases.
-Omit `cli-version` to keep using the latest Tessl CLI. Set it to a specific version when you need reproducible runs or a short rollout delay for new CLI releases.
-
-The CLI is only installed for `mode: review`; `/apply-optimize` does not need the Tessl CLI.
 
 ## Inputs reference
 
