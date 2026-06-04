@@ -81,6 +81,8 @@ Add `fail-threshold` to the `review` job to fail the check when a skill scores b
 When `optimize: true`, the threshold is checked against the **post-optimize achievable score**. So skills the optimizer can lift above the threshold pass the check — the user has a one-click `/apply-optimize` path to merge. Skills even the optimizer can't lift fail (genuine quality issue).
 
 Omit `cli-version` to keep using the latest Tessl CLI. Set it to a specific version when you need reproducible runs or a short rollout delay for new CLI releases.
+Omit `cli-version` to keep using the latest Tessl CLI. Set it to a specific version when you need reproducible runs or a short rollout delay for new CLI releases.
+
 The CLI is only installed for `mode: review`; `/apply-optimize` does not need the Tessl CLI.
 
 ## Inputs reference
