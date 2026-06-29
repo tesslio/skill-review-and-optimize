@@ -7,6 +7,7 @@ import type { SkillReviewResult } from './skill-review.ts';
 import {
   effectivePass,
   effectiveScore,
+  isAuthErrorMessage,
   parseOptimizeIterations,
   runSkillOptimize,
   runSkillReview,
@@ -123,7 +124,18 @@ async function main(): Promise<void> {
     }
   }
 
-  // 5b. Post inline suggestion blocks on the PR diff (opt-in)
+  // 5b. Auth failures are infrastructure failures, not score failures.
+  // `fail-threshold: 0` disables score gating only; it must not hide missing auth.
+  const authFailures = results.filter((r) => isAuthErrorMessage(r.error));
+  if (authFailures.length > 0) {
+    const summary = authFailures.map((r) => `  ${r.skillPath}`).join('\n');
+    core.setFailed(
+      `Tessl authentication failed for ${authFailures.length} skill(s). Configure the tessl-token input with a Tessl API token stored in a GitHub secret.\n${summary}`,
+    );
+    return;
+  }
+
+  // 5c. Post inline suggestion blocks on the PR diff (opt-in)
   if (inlineSuggestionsEnabled && optimizeEnabled) {
     const commitId = github.context.payload.pull_request?.head?.sha as string | undefined;
     if (commitId) {

@@ -162,6 +162,13 @@ export interface SkillReviewResult {
   optimize?: OptimizeResult;
 }
 
+export function isAuthErrorMessage(message: string | undefined): boolean {
+  if (!message) return false;
+  return /requires you to be logged in|run tessl login|401 unauthorized|authentication required|not authenticated/i.test(
+    message,
+  );
+}
+
 /**
  * The threshold-comparison score for a skill. When optimize produced a
  * recommendable improvement we use the after-score (the achievable
@@ -187,6 +194,7 @@ export function effectivePass(
   result: SkillReviewResult,
   threshold: number,
 ): boolean {
+  if (isAuthErrorMessage(result.error)) return false;
   if (threshold === 0) return true;
   if (result.error) return false;
   return effectiveScore(result) >= threshold;
@@ -210,15 +218,16 @@ export async function runSkillReview(
 
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
+    const error = stderr || stdout || `Process exited with code ${exitCode}`;
     console.warn(
-      `tessl skill review failed for ${skillFilePath} (exit code ${exitCode}): ${stderr}`,
+      `tessl skill review failed for ${skillFilePath} (exit code ${exitCode}): ${error}`,
     );
     return {
       skillPath: skillFilePath,
-      passed: threshold === 0,
+      passed: threshold === 0 && !isAuthErrorMessage(error),
       score: -1,
       output: '',
-      error: stderr || `Process exited with code ${exitCode}`,
+      error,
     };
   }
 
