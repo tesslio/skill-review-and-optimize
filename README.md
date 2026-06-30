@@ -64,6 +64,7 @@ To pin the Tessl CLI version used for review runs, add `cli-version` to the revi
 - uses: tesslio/skill-review-and-optimize@7b2383f98ce4d2ba281a9a1d573a9f82390ad7db
   with:
     cli-version: 0.73.0
+    tessl-token: ${{ secrets.TESSL_API_TOKEN }}
 ```
 
 Omit `cli-version` to keep using the latest Tessl CLI. Set it to a specific version when you need reproducible runs or a short rollout delay for new CLI releases.
@@ -95,7 +96,7 @@ When `optimize: true`, the threshold is checked against the **post-optimize achi
 
 | Input | Description | Default |
 |---|---|---|
-| `tessl-token` | Tessl API token. Required for `optimize: true`. [Get one here](https://tessl.io/account/api-keys). | _(required for optimize)_ |
+| `tessl-token` | Tessl API token. Required for `mode: review`; not needed for `mode: apply`. [Get one here](https://tessl.io/account/api-keys). | _(required for review)_ |
 | `optimize` | Run AI-powered optimization after review | `false` |
 | `inline-suggestions` | Post inline `suggestion` blocks on the PR file diff | `false` |
 | `fail-threshold` | Minimum score (0-100) to pass the check. `0` = never fail. | `0` |
@@ -122,8 +123,8 @@ With `inline-suggestions: true`, every `Commit suggestion` click pushes a new co
 ## How it works
 
 1. Detects which `SKILL.md` files changed in the PR
-2. Runs `tessl skill review` on each one for a quality score
-3. If `optimize: true`, runs the optimizer to suggest improvements (requires `tessl-token`)
+2. Runs authenticated `tessl skill review` on each one for a quality score
+3. If `optimize: true`, runs the optimizer to suggest improvements using the same token
 4. Posts (or updates) a single summary comment per PR with the score and per-dimension review
 5. If `inline-suggestions: true`, also posts a single batched PR review with one inline `suggestion` block per diff hunk; prior bot suggestions are cleaned up before each new run
 6. If `fail-threshold` is set, fails the check when the post-optimize achievable score is below threshold

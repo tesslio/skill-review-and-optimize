@@ -78,6 +78,7 @@ const {
   parseOptimizeIterations,
   effectiveScore,
   effectivePass,
+  isAuthErrorMessage,
 } = await import('./skill-review.ts');
 const { postOrUpdateComment } = await import('./comment.ts');
 const { parseThreshold } = await import('./main.ts');
@@ -398,6 +399,22 @@ describe('runSkillReview', () => {
     const result = await runSkillReview('skills/test/SKILL.md', 0);
     expect(result.passed).toBe(true);
     expect(result.score).toBe(-1);
+  });
+
+  test('auth failure with threshold 0 still fails', async () => {
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn('', '✘ 401 Unauthorized', 1);
+
+    const result = await runSkillReview('skills/test/SKILL.md', 0);
+    expect(result.passed).toBe(false);
+    expect(result.score).toBe(-1);
+    expect(result.error).toContain('401 Unauthorized');
+  });
+
+  test('detects login-required auth failures', () => {
+    expect(isAuthErrorMessage('Skill review requires you to be logged in. Run tessl login to log in.')).toBe(true);
+    expect(isAuthErrorMessage('✘ 401 Unauthorized')).toBe(true);
+    expect(isAuthErrorMessage('some validation error')).toBe(false);
   });
 
   test('malformed JSON output (unclosed brace)', async () => {
@@ -967,6 +984,12 @@ describe('effectivePass', () => {
     expect(effectivePass({
       skillPath: 'a', passed: false, score: 0, output: '',
     }, 0)).toBe(true);
+  });
+
+  test('threshold 0 does not pass auth errors', () => {
+    expect(effectivePass({
+      skillPath: 'a', passed: false, score: -1, output: '', error: '✘ 401 Unauthorized',
+    }, 0)).toBe(false);
   });
 
   test('error result always fails', () => {
