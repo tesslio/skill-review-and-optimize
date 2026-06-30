@@ -2,6 +2,18 @@
 
 Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed in a PR, scores it, and posts inline suggestions the author can accept with one click.
 
+> ⚠️ **Breaking change — review now requires authentication.** `tessl skill review` now
+> requires a Tessl token (a security fix; the old unauthenticated path is closed). If your
+> workflow ran review **without** a `tessl-token`, your CI is now failing with
+> `401 Unauthorized`. To restore it:
+>
+> 1. Create a [Tessl API token](https://tessl.io/account/api-keys) and add it as a repository secret named `TESSL_API_TOKEN`.
+> 2. Pass it to the review step: `tessl-token: ${{ secrets.TESSL_API_TOKEN }}`.
+> 3. Bump the pinned SHA to `@93b965b93a5b20dcde529dfd923fcfed43797de4` (or later).
+>
+> A token was previously only needed for `optimize: true`; it is now required for review as
+> well. `mode: apply` (`/apply-optimize`) still needs no token.
+
 ## What you'll see when a PR changes a SKILL.md
 
 - A summary comment with a quality score and a per-dimension review of the skill
@@ -31,7 +43,7 @@ Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed
          contents: read
        steps:
          - uses: actions/checkout@v4
-         - uses: tesslio/skill-review-and-optimize@7b2383f98ce4d2ba281a9a1d573a9f82390ad7db
+         - uses: tesslio/skill-review-and-optimize@93b965b93a5b20dcde529dfd923fcfed43797de4
            with:
              optimize: true
              inline-suggestions: true
@@ -51,7 +63,7 @@ Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed
          - uses: actions/checkout@v4
            with:
              fetch-depth: 0
-         - uses: tesslio/skill-review-and-optimize@7b2383f98ce4d2ba281a9a1d573a9f82390ad7db
+         - uses: tesslio/skill-review-and-optimize@93b965b93a5b20dcde529dfd923fcfed43797de4
            with:
              mode: apply
    ```
@@ -61,7 +73,7 @@ That's it. Open a PR that changes a `SKILL.md` and the bot will comment.
 To pin the Tessl CLI version used for review runs, add `cli-version` to the review step:
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@7b2383f98ce4d2ba281a9a1d573a9f82390ad7db
+- uses: tesslio/skill-review-and-optimize@93b965b93a5b20dcde529dfd923fcfed43797de4
   with:
     cli-version: 0.73.0
     tessl-token: ${{ secrets.TESSL_API_TOKEN }}
@@ -73,7 +85,7 @@ The CLI is only installed for `mode: review`; `/apply-optimize` does not need th
 
 > ⚠️ **First-time setup gotcha — `/apply-optimize` won't work on the PR that introduces this workflow.** GitHub reads `issue_comment` workflows from your **default branch only**, never from a PR branch. So the very first time you add this file, you need to land it on `main` (typically by merging the PR that added it) before `/apply-optimize` fires on any PR. After that, it works on every future PR. The review side (the summary comment + inline suggestions) is unaffected — it works from the PR branch on the very first run.
 >
-> **The pinned SHA** (`@e7b9c0…`) keeps your workflow reproducible. Bump it from the [tags page](https://github.com/tesslio/skill-review-and-optimize/tags) when you intentionally upgrade.
+> **The pinned SHA** (`@93b965b…`) keeps your workflow reproducible. Bump it from the [commits page](https://github.com/tesslio/skill-review-and-optimize/commits/main) when you intentionally upgrade.
 >
 > **Already wired this up as two separate workflows** (`skill-review.yml` + `apply-optimize.yml`) from an earlier setup? No migration needed — both patterns work identically. The single-file workflow above is just simpler to copy from scratch.
 
@@ -82,7 +94,7 @@ The CLI is only installed for `mode: review`; `/apply-optimize` does not need th
 Add `fail-threshold` to the `review` job to fail the check when a skill scores below your minimum:
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@7b2383f98ce4d2ba281a9a1d573a9f82390ad7db
+- uses: tesslio/skill-review-and-optimize@93b965b93a5b20dcde529dfd923fcfed43797de4
   with:
     optimize: true
     inline-suggestions: true
@@ -112,7 +124,7 @@ When `optimize: true`, the threshold is checked against the **post-optimize achi
 With `inline-suggestions: true`, every `Commit suggestion` click pushes a new commit and re-fires the workflow — by default the action re-reviews and posts a fresh summary. Set `re-review-on-suggestion-acceptance: false` to detect those commits (GitHub-signed web-flow committer + either `Apply suggestions from code review` for batch accepts or `Update <path>` with a `Co-authored-by:` trailer for single accepts) and exit early, leaving the original review in place. Plain web edits (the pencil "Edit this file" button), `/apply-optimize`, and ordinary human pushes still trigger a review.
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@7b2383f98ce4d2ba281a9a1d573a9f82390ad7db
+- uses: tesslio/skill-review-and-optimize@93b965b93a5b20dcde529dfd923fcfed43797de4
   with:
     optimize: true
     inline-suggestions: true
