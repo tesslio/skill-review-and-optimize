@@ -31,6 +31,9 @@ inputs:
   re-review-on-suggestion-acceptance:
     description: 'Re-run review when a commit comes from accepting a GitHub inline `suggestion` (Commit suggestion / Apply suggestions from code review). Set to "false" to skip those runs — the original review comment is left in place. Default "true" preserves prior behavior.'
     default: 'true'
+  workspace:
+    description: 'Tessl workspace name or ID that reviews run against (see `tessl workspace list`). Required by Tessl Review.'
+    required: true
   tessl-token:
     description: 'Tessl API token used to authenticate review and optimization requests. Store this as a GitHub secret, for example secrets.TESSL_TOKEN.'
     required: false
@@ -55,6 +58,7 @@ runs:
         INPUT_PATH: ${{ inputs.path }}
         INPUT_COMMENT: ${{ inputs.comment }}
         INPUT_FAIL_THRESHOLD: ${{ inputs.fail-threshold }}
+        INPUT_WORKSPACE: ${{ inputs.workspace }}
         INPUT_OPTIMIZE: ${{ inputs.optimize }}
         INPUT_OPTIMIZE_ITERATIONS: ${{ inputs.optimize-iterations }}
         INPUT_INLINE_SUGGESTIONS: ${{ inputs.inline-suggestions }}

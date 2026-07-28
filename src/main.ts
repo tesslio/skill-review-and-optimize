@@ -21,7 +21,18 @@ async function main(): Promise<void> {
   const rootPath = process.env.INPUT_PATH || '.';
   const shouldComment = process.env.INPUT_COMMENT !== 'false';
   const threshold = parseThreshold(process.env.INPUT_FAIL_THRESHOLD);
+  const workspace = (process.env.INPUT_WORKSPACE || '').trim();
   const optimizeEnabled = process.env.INPUT_OPTIMIZE === 'true';
+
+  // Tessl Review requires a workspace. Fail early with an actionable message.
+  if (!workspace) {
+    core.setFailed(
+      'The `workspace` input is required. Set it to your Tessl workspace name or ID ' +
+        '(see `tessl workspace list`), for example:\n' +
+        '    with:\n      workspace: your-workspace\n      tessl-token: ${{ secrets.TESSL_TOKEN }}',
+    );
+    return;
+  }
   const maxIterations = parseOptimizeIterations(process.env.INPUT_OPTIMIZE_ITERATIONS);
   const inlineSuggestionsEnabled = process.env.INPUT_INLINE_SUGGESTIONS === 'true';
   const reReviewOnSuggestion =
@@ -64,7 +75,7 @@ async function main(): Promise<void> {
     const batchResults = await Promise.all(
       batch.map(async (filePath) => {
         console.log(`Reviewing ${filePath}...`);
-        const result = await runSkillReview(filePath, threshold);
+        const result = await runSkillReview(filePath, threshold, workspace);
         const status = result.error
           ? 'ERROR'
           : result.passed
@@ -94,6 +105,7 @@ async function main(): Promise<void> {
               result.skillPath,
               result.score,
               maxIterations,
+              workspace,
             );
             result.optimize = optimizeResult;
             if (optimizeResult.optimized) {

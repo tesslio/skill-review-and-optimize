@@ -298,34 +298,39 @@ describe('runSkillReview', () => {
     Bun.spawn = originalSpawn;
   });
 
+  const WS = 'test-workspace';
+
   test('successful review with JSON output', async () => {
     const jsonOutput = JSON.stringify({
-      contentJudge: {
-        normalizedScore: 0.85,
-        evaluation: 'Good skill definition.',
+      review: { reviewScore: 85 },
+      validation: {
+        overallPassed: true,
+        checks: [
+          { name: 'frontmatter_valid', status: 'passed', message: 'YAML frontmatter is valid' },
+        ],
       },
-      validation: { output: 'All checks passed.' },
+      judges: {
+        content: { normalizedScore: 0.85, evaluation: 'Good skill definition.' },
+      },
     });
 
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
 
-    const result = await runSkillReview('skills/test/SKILL.md', 70);
+    const result = await runSkillReview('skills/test/SKILL.md', 70, WS);
     expect(result.skillPath).toBe('skills/test/SKILL.md');
     expect(result.score).toBe(85);
     expect(result.passed).toBe(true);
     expect(result.error).toBeUndefined();
-    expect(result.output).toContain('All checks passed.');
+    expect(result.output).toContain('checks passed');
     expect(result.output).toContain('Good skill definition.');
   });
 
   test('uses TESSL_BIN from setup-tessl when provided', async () => {
     const originalTesslBin = process.env.TESSL_BIN;
     const jsonOutput = JSON.stringify({
-      contentJudge: {
-        normalizedScore: 0.85,
-        evaluation: 'Good skill definition.',
-      },
+      review: { reviewScore: 85 },
+      judges: { content: { normalizedScore: 0.85, evaluation: 'Good skill definition.' } },
     });
     const spawnMock = makeMockSpawn(jsonOutput, '', 0);
 
@@ -334,14 +339,17 @@ describe('runSkillReview', () => {
       // @ts-expect-error mock assignment
       Bun.spawn = spawnMock;
 
-      await runSkillReview('skills/test/SKILL.md', 70);
+      await runSkillReview('skills/test/SKILL.md', 70, WS);
 
       const firstCall = spawnMock.mock.calls[0] as unknown[];
       expect(firstCall[0]).toEqual([
         '/runner/tool-cache/tessl/0.73.0/linux-x64/tessl',
-        'skill',
         'review',
+        'run',
+        'quality',
         '--json',
+        '--workspace',
+        WS,
         'skills/test',
       ]);
     } finally {
@@ -356,10 +364,8 @@ describe('runSkillReview', () => {
   test('falls back to package binary when TESSL_BIN is blank', async () => {
     const originalTesslBin = process.env.TESSL_BIN;
     const jsonOutput = JSON.stringify({
-      contentJudge: {
-        normalizedScore: 0.85,
-        evaluation: 'Good skill definition.',
-      },
+      review: { reviewScore: 85 },
+      judges: { content: { normalizedScore: 0.85, evaluation: 'Good skill definition.' } },
     });
     const spawnMock = makeMockSpawn(jsonOutput, '', 0);
 
@@ -368,7 +374,7 @@ describe('runSkillReview', () => {
       // @ts-expect-error mock assignment
       Bun.spawn = spawnMock;
 
-      await runSkillReview('skills/test/SKILL.md', 70);
+      await runSkillReview('skills/test/SKILL.md', 70, WS);
 
       const firstCall = spawnMock.mock.calls[0] as unknown[];
       const command = firstCall[0] as string[];
@@ -386,7 +392,7 @@ describe('runSkillReview', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('', 'Command not found', 1);
 
-    const result = await runSkillReview('skills/test/SKILL.md', 50);
+    const result = await runSkillReview('skills/test/SKILL.md', 50, WS);
     expect(result.score).toBe(-1);
     expect(result.passed).toBe(false);
     expect(result.error).toBe('Command not found');
@@ -396,7 +402,7 @@ describe('runSkillReview', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('', 'some error', 1);
 
-    const result = await runSkillReview('skills/test/SKILL.md', 0);
+    const result = await runSkillReview('skills/test/SKILL.md', 0, WS);
     expect(result.passed).toBe(true);
     expect(result.score).toBe(-1);
   });
@@ -405,7 +411,7 @@ describe('runSkillReview', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('', '✘ 401 Unauthorized', 1);
 
-    const result = await runSkillReview('skills/test/SKILL.md', 0);
+    const result = await runSkillReview('skills/test/SKILL.md', 0, WS);
     expect(result.passed).toBe(false);
     expect(result.score).toBe(-1);
     expect(result.error).toContain('401 Unauthorized');
@@ -421,7 +427,7 @@ describe('runSkillReview', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('{ broken json !!!', '', 0);
 
-    const result = await runSkillReview('skills/test/SKILL.md', 50);
+    const result = await runSkillReview('skills/test/SKILL.md', 50, WS);
     expect(result.score).toBe(-1);
     expect(result.error).toBe('Could not parse review output');
     expect(result.passed).toBe(false);
@@ -431,7 +437,7 @@ describe('runSkillReview', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('{ not: valid: json }', '', 0);
 
-    const result = await runSkillReview('skills/test/SKILL.md', 50);
+    const result = await runSkillReview('skills/test/SKILL.md', 50, WS);
     expect(result.score).toBe(-1);
     expect(result.error).toBe('Failed to parse JSON output');
     expect(result.passed).toBe(false);
@@ -441,7 +447,7 @@ describe('runSkillReview', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('Some plain text output with no json', '', 0);
 
-    const result = await runSkillReview('skills/test/SKILL.md', 50);
+    const result = await runSkillReview('skills/test/SKILL.md', 50, WS);
     expect(result.score).toBe(-1);
     expect(result.error).toBe('Could not parse review output');
   });
@@ -449,49 +455,53 @@ describe('runSkillReview', () => {
   test('threshold pass/fail logic', async () => {
     const makeJson = (score: number) =>
       JSON.stringify({
-        contentJudge: { normalizedScore: score, evaluation: 'test' },
+        review: { reviewScore: score },
+        judges: { content: { normalizedScore: score / 100, evaluation: 'test' } },
       });
 
     // Score 60% with threshold 50 → passed
     // @ts-expect-error mock assignment
-    Bun.spawn = makeMockSpawn(makeJson(0.6), '', 0);
-    const passing = await runSkillReview('a/SKILL.md', 50);
+    Bun.spawn = makeMockSpawn(makeJson(60), '', 0);
+    const passing = await runSkillReview('a/SKILL.md', 50, WS);
     expect(passing.score).toBe(60);
     expect(passing.passed).toBe(true);
 
     // Score 40% with threshold 50 → failed
     // @ts-expect-error mock assignment
-    Bun.spawn = makeMockSpawn(makeJson(0.4), '', 0);
-    const failing = await runSkillReview('b/SKILL.md', 50);
+    Bun.spawn = makeMockSpawn(makeJson(40), '', 0);
+    const failing = await runSkillReview('b/SKILL.md', 50, WS);
     expect(failing.score).toBe(40);
     expect(failing.passed).toBe(false);
 
     // Score 50% with threshold 50 → passed (>= threshold)
     // @ts-expect-error mock assignment
-    Bun.spawn = makeMockSpawn(makeJson(0.5), '', 0);
-    const boundary = await runSkillReview('c/SKILL.md', 50);
+    Bun.spawn = makeMockSpawn(makeJson(50), '', 0);
+    const boundary = await runSkillReview('c/SKILL.md', 50, WS);
     expect(boundary.score).toBe(50);
     expect(boundary.passed).toBe(true);
 
     // Any score with threshold 0 → always passed
     // @ts-expect-error mock assignment
-    Bun.spawn = makeMockSpawn(makeJson(0.1), '', 0);
-    const noThreshold = await runSkillReview('d/SKILL.md', 0);
+    Bun.spawn = makeMockSpawn(makeJson(10), '', 0);
+    const noThreshold = await runSkillReview('d/SKILL.md', 0, WS);
     expect(noThreshold.score).toBe(10);
     expect(noThreshold.passed).toBe(true);
   });
 
   test('formats structured evaluation object into markdown', async () => {
     const jsonOutput = JSON.stringify({
-      contentJudge: {
-        normalizedScore: 0.5,
-        evaluation: {
-          scores: {
-            conciseness: { score: 2, reasoning: 'Too verbose' },
-            actionability: { score: 3, reasoning: 'Good examples' },
+      review: { reviewScore: 50 },
+      judges: {
+        content: {
+          normalizedScore: 0.5,
+          evaluation: {
+            scores: {
+              conciseness: { score: 2, reasoning: 'Too verbose' },
+              actionability: { score: 3, reasoning: 'Good examples' },
+            },
+            overall_assessment: 'Decent skill with room for improvement.',
+            suggestions: ['Be more concise', 'Add validation steps'],
           },
-          overall_assessment: 'Decent skill with room for improvement.',
-          suggestions: ['Be more concise', 'Add validation steps'],
         },
       },
     });
@@ -499,7 +509,7 @@ describe('runSkillReview', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
 
-    const result = await runSkillReview('a/SKILL.md', 0);
+    const result = await runSkillReview('a/SKILL.md', 0, WS);
     expect(result.output).toContain('| Dimension |');
     expect(result.output).toContain('| Suggestion |');
     expect(result.output).toContain('**conciseness**');
@@ -514,14 +524,15 @@ describe('runSkillReview', () => {
 
   test('JSON with prefix and suffix text', async () => {
     const json = JSON.stringify({
-      contentJudge: { normalizedScore: 0.72, evaluation: 'decent' },
+      review: { reviewScore: 72 },
+      judges: { content: { normalizedScore: 0.72, evaluation: 'decent' } },
     });
     const stdout = `Running review...\n${json}\nDone.`;
 
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn(stdout, '', 0);
 
-    const result = await runSkillReview('a/SKILL.md', 50);
+    const result = await runSkillReview('a/SKILL.md', 50, WS);
     expect(result.score).toBe(72);
     expect(result.passed).toBe(true);
   });
@@ -1301,6 +1312,8 @@ describe('runSkillOptimize', () => {
     Bun.write = originalWrite;
   });
 
+  const WS = 'test-workspace';
+
   test('successful optimization with content change', async () => {
     const originalContent = '---\nname: test\n---\nOriginal';
     const optimizedContent = '---\nname: test\n---\nOptimized';
@@ -1318,12 +1331,12 @@ describe('runSkillOptimize', () => {
     Bun.write = mock(() => Promise.resolve(0));
 
     const jsonOutput = JSON.stringify({
-      contentJudge: { normalizedScore: 0.92 },
+      review: { reviewScore: 92 },
     });
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
 
-    const result = await runSkillOptimize('skills/test/SKILL.md', 60, 3);
+    const result = await runSkillOptimize('skills/test/SKILL.md', 60, 3, WS);
     expect(result.optimized).toBe(true);
     expect(result.beforeScore).toBe(60);
     expect(result.afterScore).toBe(92);
@@ -1342,12 +1355,12 @@ describe('runSkillOptimize', () => {
     Bun.write = mock(() => Promise.resolve(0));
 
     const jsonOutput = JSON.stringify({
-      contentJudge: { normalizedScore: 0.95 },
+      review: { reviewScore: 95 },
     });
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
 
-    const result = await runSkillOptimize('skills/test/SKILL.md', 95, 3);
+    const result = await runSkillOptimize('skills/test/SKILL.md', 95, 3, WS);
     expect(result.optimized).toBe(false);
     expect(result.beforeScore).toBe(95);
     expect(result.afterScore).toBe(95);
@@ -1369,14 +1382,14 @@ describe('runSkillOptimize', () => {
     // @ts-ignore mock assignment
     Bun.write = mock(() => Promise.resolve(0));
 
-    // Follow-up review returns a lower normalized score than beforeScore (80).
+    // Follow-up review returns a lower score than beforeScore (80).
     const jsonOutput = JSON.stringify({
-      contentJudge: { normalizedScore: 0.60 },
+      review: { reviewScore: 60 },
     });
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
 
-    const result = await runSkillOptimize('skills/test/SKILL.md', 80, 3);
+    const result = await runSkillOptimize('skills/test/SKILL.md', 80, 3, WS);
     expect(result.optimized).toBe(false);
     expect(result.beforeScore).toBe(80);
     expect(result.afterScore).toBe(60);
@@ -1396,7 +1409,7 @@ describe('runSkillOptimize', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('', 'auth error', 1);
 
-    const result = await runSkillOptimize('skills/test/SKILL.md', 50, 3);
+    const result = await runSkillOptimize('skills/test/SKILL.md', 50, 3, WS);
     expect(result.optimized).toBe(false);
     expect(result.error).toContain('Optimize exited with code 1');
     expect(result.beforeScore).toBe(50);
@@ -1418,11 +1431,11 @@ describe('runSkillOptimize', () => {
     // @ts-ignore mock assignment
     Bun.write = writeMock;
 
-    const jsonOutput = JSON.stringify({ contentJudge: { normalizedScore: 0.9 } });
+    const jsonOutput = JSON.stringify({ review: { reviewScore: 90 } });
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
 
-    await runSkillOptimize('skills/test/SKILL.md', 50, 3);
+    await runSkillOptimize('skills/test/SKILL.md', 50, 3, WS);
 
     // Should have called write to restore original content
     expect(writeMock).toHaveBeenCalled();

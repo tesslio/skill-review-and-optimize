@@ -93,12 +93,6 @@ function formatEvaluation(value: unknown): string {
   return parts.length > 0 ? parts.join('\n') : JSON.stringify(value, null, 2);
 }
 
-/** Safely convert an unknown value to a readable string */
-function stringify(value: unknown): string {
-  if (typeof value === 'string') return value;
-  return JSON.stringify(value, null, 2);
-}
-
 /**
  * Extract the first complete top-level JSON object from a string
  * that may contain non-JSON text before/after it.
@@ -160,6 +154,65 @@ export interface SkillReviewResult {
   output: string;
   error?: string;
   optimize?: OptimizeResult;
+  /**
+   * Required changes surfaced prominently (not hidden in a <details>):
+   * failed/warning validation checks plus the content judge's suggestions.
+   */
+  requiredChanges?: string[];
+  /** One-line summary from the content judge, if present. */
+  overallAssessment?: string;
+}
+
+interface Evaluation {
+  scores?: Record<string, { score?: number; reasoning?: string }>;
+  suggestions?: string[];
+  overall_assessment?: string;
+}
+
+interface ReviewRunJson {
+  review?: { reviewScore?: number };
+  validation?: {
+    overallPassed?: boolean;
+    errorCount?: number;
+    warningCount?: number;
+    checks?: Array<{ name?: string; status?: string; message?: string }>;
+  };
+  judges?: {
+    content?: { normalizedScore?: number; evaluation?: unknown };
+    description?: { normalizedScore?: number; evaluation?: unknown };
+  };
+}
+
+/** Score from the new `tessl review run --json` shape (0-100). */
+function reviewScoreFrom(parsed: ReviewRunJson): number {
+  return typeof parsed.review?.reviewScore === 'number'
+    ? parsed.review.reviewScore
+    : Math.round((parsed.judges?.content?.normalizedScore ?? 0) * 100);
+}
+
+/**
+ * Render validation checks: the failing/warning messages (for prominent
+ * display) and a markdown block listing anything that didn't pass.
+ */
+function formatValidation(
+  validation: ReviewRunJson['validation'],
+): { failures: string[]; markdown: string } {
+  const checks = validation?.checks ?? [];
+  if (checks.length === 0) return { failures: [], markdown: '' };
+
+  const notPassed = checks.filter((c) => c.status && c.status !== 'passed');
+  const failures = notPassed.map((c) => c.message ?? c.name ?? 'validation issue');
+
+  const parts: string[] = ['### Validation Checks', ''];
+  if (notPassed.length === 0) {
+    parts.push(`✅ All ${checks.length} checks passed.`);
+  } else {
+    for (const c of notPassed) {
+      const icon = c.status === 'warning' ? '⚠️' : '❌';
+      parts.push(`- ${icon} **${c.name}** — ${c.message ?? ''}`);
+    }
+  }
+  return { failures, markdown: parts.join('\n') };
 }
 
 export function isAuthErrorMessage(message: string | undefined): boolean {
@@ -203,13 +256,16 @@ export function effectivePass(
 export async function runSkillReview(
   skillFilePath: string,
   threshold: number,
+  workspace: string,
 ): Promise<SkillReviewResult> {
   const skillDir = dirname(skillFilePath);
 
-  const proc = Bun.spawn([tesslBin(), 'skill', 'review', '--json', skillDir], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
+  // Tessl Review (replaces the deprecated `tessl skill review`). Single
+  // blocking call; a workspace is now required.
+  const proc = Bun.spawn(
+    [tesslBin(), 'review', 'run', 'quality', '--json', '--workspace', workspace, skillDir],
+    { stdout: 'pipe', stderr: 'pipe' },
+  );
 
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -220,7 +276,7 @@ export async function runSkillReview(
   if (exitCode !== 0) {
     const error = stderr || stdout || `Process exited with code ${exitCode}`;
     console.warn(
-      `tessl skill review failed for ${skillFilePath} (exit code ${exitCode}): ${error}`,
+      `tessl review run failed for ${skillFilePath} (exit code ${exitCode}): ${error}`,
     );
     return {
       skillPath: skillFilePath,
@@ -233,7 +289,7 @@ export async function runSkillReview(
 
   const jsonStr = extractJson(stdout);
   if (!jsonStr) {
-    console.warn(`No JSON found in skill review output for ${skillFilePath}`);
+    console.warn(`No JSON found in review output for ${skillFilePath}`);
     return {
       skillPath: skillFilePath,
       passed: threshold === 0,
@@ -242,15 +298,12 @@ export async function runSkillReview(
       error: 'Could not parse review output',
     };
   }
-  let parsed: {
-    contentJudge?: { normalizedScore?: number; evaluation?: unknown };
-    validation?: { output?: unknown };
-  };
 
+  let parsed: ReviewRunJson;
   try {
-    parsed = JSON.parse(jsonStr) as typeof parsed;
+    parsed = JSON.parse(jsonStr) as ReviewRunJson;
   } catch {
-    console.warn(`Failed to parse skill review JSON for ${skillFilePath}`);
+    console.warn(`Failed to parse review JSON for ${skillFilePath}`);
     return {
       skillPath: skillFilePath,
       passed: threshold === 0,
@@ -260,18 +313,33 @@ export async function runSkillReview(
     };
   }
 
-  const normalizedScore = parsed.contentJudge?.normalizedScore ?? 0;
-  const score = Math.round(normalizedScore * 100);
+  const score = reviewScoreFrom(parsed);
+
+  const contentEval = parsed.judges?.content?.evaluation as Evaluation | undefined;
+  const { failures: validationFailures, markdown: validationMarkdown } =
+    formatValidation(parsed.validation);
+
+  const suggestions =
+    contentEval && Array.isArray(contentEval.suggestions)
+      ? contentEval.suggestions.filter((s): s is string => typeof s === 'string')
+      : [];
+  const requiredChanges = [...validationFailures, ...suggestions];
+  const overallAssessment =
+    contentEval && typeof contentEval.overall_assessment === 'string'
+      ? contentEval.overall_assessment
+      : undefined;
 
   const outputParts: string[] = [];
-  if (parsed.validation?.output) {
+  if (validationMarkdown) outputParts.push(validationMarkdown);
+  if (parsed.judges?.content?.evaluation) {
     outputParts.push(
-      '### Validation Checks\n\n' + stringify(parsed.validation.output),
+      '### Review Details\n\n' + formatEvaluation(parsed.judges.content.evaluation),
     );
   }
-  if (parsed.contentJudge?.evaluation) {
+  if (parsed.judges?.description?.evaluation) {
     outputParts.push(
-      '### Review Details\n\n' + formatEvaluation(parsed.contentJudge.evaluation),
+      '### Description Review\n\n' +
+        formatEvaluation(parsed.judges.description.evaluation),
     );
   }
 
@@ -280,6 +348,8 @@ export async function runSkillReview(
     passed: threshold === 0 || score >= threshold,
     score,
     output: outputParts.length > 0 ? outputParts.join('\n\n') : stdout,
+    requiredChanges: requiredChanges.length > 0 ? requiredChanges : undefined,
+    overallAssessment,
   };
 }
 
@@ -297,16 +367,22 @@ export async function runSkillOptimize(
   skillFilePath: string,
   beforeScore: number,
   maxIterations: number,
+  workspace: string,
 ): Promise<OptimizeResult> {
   const skillDir = dirname(skillFilePath);
 
   // Read original content to detect changes and restore afterward
   const originalContent = await Bun.file(skillFilePath).text();
 
+  // Tessl Review's `review fix` is the automated review-and-fix loop that
+  // replaces the old `skill review --optimize`. With --yes it applies the
+  // improved skill to disk, which we detect and (in suggestion-only mode)
+  // revert below after capturing an after-score.
   const proc = Bun.spawn(
     [
-      tesslBin(), 'skill', 'review',
-      '--optimize', '--yes',
+      tesslBin(), 'review', 'fix',
+      '--workspace', workspace,
+      '--yes',
       '--max-iterations', String(maxIterations),
       skillDir,
     ],
@@ -322,7 +398,7 @@ export async function runSkillOptimize(
   if (exitCode !== 0) {
     // Log stderr for debugging (strip any token-like strings)
     const safeStderr = stderr.replace(/[A-Za-z0-9_-]{20,}/g, '***');
-    console.warn(`tessl optimize stderr: ${safeStderr}`);
+    console.warn(`tessl review fix stderr: ${safeStderr}`);
     // Restore original in case of partial write
     await Bun.write(skillFilePath, originalContent);
     // Do not include raw stderr in error — it may contain auth token from tessl CLI
@@ -338,11 +414,11 @@ export async function runSkillOptimize(
   const newContent = await Bun.file(skillFilePath).text();
   const contentChanged = newContent !== originalContent;
 
-  // Get after-score by running a separate review (--json not supported with --optimize)
+  // Get after-score by running a fresh review of the improved skill.
   let afterScore = beforeScore;
   if (contentChanged) {
     const reviewProc = Bun.spawn(
-      [tesslBin(), 'skill', 'review', '--json', skillDir],
+      [tesslBin(), 'review', 'run', 'quality', '--json', '--workspace', workspace, skillDir],
       { stdout: 'pipe', stderr: 'pipe' },
     );
     const reviewStdout = await new Response(reviewProc.stdout).text();
@@ -350,12 +426,7 @@ export async function runSkillOptimize(
     const jsonStr = extractJson(reviewStdout);
     if (jsonStr) {
       try {
-        const parsed = JSON.parse(jsonStr) as {
-          contentJudge?: { normalizedScore?: number };
-        };
-        if (typeof parsed.contentJudge?.normalizedScore === 'number') {
-          afterScore = Math.round(parsed.contentJudge.normalizedScore * 100);
-        }
+        afterScore = reviewScoreFrom(JSON.parse(jsonStr) as ReviewRunJson);
       } catch {
         // Score parsing failed; keep beforeScore
       }

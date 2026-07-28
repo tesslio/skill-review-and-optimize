@@ -2,17 +2,20 @@
 
 Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed in a PR, scores it, and posts inline suggestions the author can accept with one click.
 
-> ⚠️ **Breaking change — review now requires authentication.** `tessl skill review` now
-> requires a Tessl token (a security fix; the old unauthenticated path is closed). If your
-> workflow ran review **without** a `tessl-token`, your CI is now failing with
-> `401 Unauthorized`. To restore it:
+> ⚠️ **Breaking change — now runs Tessl Review.** This action has moved from the
+> deprecated `tessl skill review` command to **Tessl Review** (`tessl review run`). Two
+> things are now required for the `review` job:
 >
-> 1. Create a [Tessl API token](https://tessl.io/account/api-keys) and add it as a repository secret named `TESSL_API_TOKEN`.
-> 2. Pass it to the review step: `tessl-token: ${{ secrets.TESSL_API_TOKEN }}`.
-> 3. Bump the pinned SHA to `@93b965b93a5b20dcde529dfd923fcfed43797de4` (or later).
+> 1. A **`workspace`** input — the Tessl workspace reviews run against. Find yours with
+>    `tessl workspace list`.
+> 2. A **`tessl-token`** — create a [Tessl API token](https://tessl.io/account/api-keys) and
+>    add it as a repository secret named `TESSL_API_TOKEN`, then pass
+>    `tessl-token: ${{ secrets.TESSL_API_TOKEN }}`.
 >
-> A token was previously only needed for `optimize: true`; it is now required for review as
-> well. `mode: apply` (`/apply-optimize`) still needs no token.
+> Reviews also draw on **Tessl credits**. If your workflow was running the old command it may
+> now return empty or failing results — update to the version below and add the `workspace`
+> input to restore it. `mode: apply` (`/apply-optimize`) still needs neither a token nor a
+> workspace.
 
 ## What you'll see when a PR changes a SKILL.md
 
@@ -45,6 +48,7 @@ Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed
          - uses: actions/checkout@v4
          - uses: tesslio/skill-review-and-optimize@93b965b93a5b20dcde529dfd923fcfed43797de4
            with:
+             workspace: your-workspace
              optimize: true
              inline-suggestions: true
              tessl-token: ${{ secrets.TESSL_API_TOKEN }}
@@ -75,6 +79,7 @@ To pin the Tessl CLI version used for review runs, add `cli-version` to the revi
 ```yaml
 - uses: tesslio/skill-review-and-optimize@93b965b93a5b20dcde529dfd923fcfed43797de4
   with:
+    workspace: your-workspace
     cli-version: 0.73.0
     tessl-token: ${{ secrets.TESSL_API_TOKEN }}
 ```
@@ -96,6 +101,7 @@ Add `fail-threshold` to the `review` job to fail the check when a skill scores b
 ```yaml
 - uses: tesslio/skill-review-and-optimize@93b965b93a5b20dcde529dfd923fcfed43797de4
   with:
+    workspace: your-workspace
     optimize: true
     inline-suggestions: true
     fail-threshold: 70
@@ -108,6 +114,7 @@ When `optimize: true`, the threshold is checked against the **post-optimize achi
 
 | Input | Description | Default |
 |---|---|---|
+| `workspace` | Tessl workspace name or ID reviews run against (see `tessl workspace list`). Required for `mode: review`; not needed for `mode: apply`. | _(required for review)_ |
 | `tessl-token` | Tessl API token. Required for `mode: review`; not needed for `mode: apply`. [Get one here](https://tessl.io/account/api-keys). | _(required for review)_ |
 | `optimize` | Run AI-powered optimization after review | `false` |
 | `inline-suggestions` | Post inline `suggestion` blocks on the PR file diff | `false` |
@@ -126,6 +133,7 @@ With `inline-suggestions: true`, every `Commit suggestion` click pushes a new co
 ```yaml
 - uses: tesslio/skill-review-and-optimize@93b965b93a5b20dcde529dfd923fcfed43797de4
   with:
+    workspace: your-workspace
     optimize: true
     inline-suggestions: true
     re-review-on-suggestion-acceptance: false
@@ -135,9 +143,9 @@ With `inline-suggestions: true`, every `Commit suggestion` click pushes a new co
 ## How it works
 
 1. Detects which `SKILL.md` files changed in the PR
-2. Runs authenticated `tessl skill review` on each one for a quality score
-3. If `optimize: true`, runs the optimizer to suggest improvements using the same token
-4. Posts (or updates) a single summary comment per PR with the score and per-dimension review
+2. Runs `tessl review run quality` (Tessl Review) on each one for a quality score, against your `workspace`
+3. If `optimize: true`, runs `tessl review fix` to suggest improvements using the same token
+4. Posts (or updates) a single summary comment per PR with the score, required changes up front, and a per-dimension review
 5. If `inline-suggestions: true`, also posts a single batched PR review with one inline `suggestion` block per diff hunk; prior bot suggestions are cleaned up before each new run
 6. If `fail-threshold` is set, fails the check when the post-optimize achievable score is below threshold
 7. When a repo collaborator comments `/apply-optimize`, the apply job extracts the optimized content from the summary comment and commits it to the PR branch
