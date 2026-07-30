@@ -246,6 +246,31 @@ export function isAuthErrorMessage(message: string | undefined): boolean {
 }
 
 /**
+ * Whether the CLI failed because it could not settle on a workspace. It picks
+ * one on its own only when the token can see exactly one, so a token with
+ * access to several needs the `workspace` input.
+ */
+export function isWorkspaceErrorMessage(message: string | undefined): boolean {
+  if (!message) return false;
+  return /--workspace/.test(message);
+}
+
+/**
+ * Whether a failure means no review ran at all, as opposed to a skill scoring
+ * badly. `fail-threshold: 0` turns off score gating and must not turn these off
+ * with it, or the check goes green having reviewed nothing.
+ */
+export function isSetupErrorMessage(message: string | undefined): boolean {
+  return isAuthErrorMessage(message) || isWorkspaceErrorMessage(message);
+}
+
+/** Guidance appended to the CLI's own error, which names a flag rather than an input. */
+const WORKSPACE_INPUT_HINT =
+  'Set the workspace input to the Tessl workspace this repository reviews against. ' +
+  'The token can see more than one, so the CLI cannot choose for you. ' +
+  'Run tessl workspace list to see the names.';
+
+/**
  * The threshold-comparison score for a skill. When optimize produced a
  * recommendable improvement we use the after-score (the achievable
  * post-optimize score); otherwise the original review score. A regressing
@@ -270,7 +295,7 @@ export function effectivePass(
   result: SkillReviewResult,
   threshold: number,
 ): boolean {
-  if (isAuthErrorMessage(result.error)) return false;
+  if (isSetupErrorMessage(result.error)) return false;
   if (threshold === 0) return true;
   if (result.error) return false;
   return effectiveScore(result) >= threshold;
@@ -286,9 +311,10 @@ export function effectivePass(
  * issues themselves. Gating belongs to the action (see `effectivePass`), so the
  * CLI must never gate.
  *
- * `--workspace` is omitted when the input is unset: the CLI then resolves the
- * workspace from the repo's `tessl.json`, or picks the only one the token can
- * see, and errors with an actionable message when neither applies.
+ * `--workspace` is omitted when the input is unset. The CLI then takes the
+ * workspace from a `tessl.json` in the repository, or picks the only one the
+ * token can see — a token with access to several is an error it can't resolve,
+ * which `runSkillReview` turns into a request for the `workspace` input.
  */
 function reviewRunArgs(skillDir: string, workspace: string | undefined): string[] {
   return [
@@ -323,13 +349,17 @@ export async function runSkillReview(
 
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
-    const error = stderr || stdout || `Process exited with code ${exitCode}`;
+    const cliError = stderr || stdout || `Process exited with code ${exitCode}`;
+    // The CLI asks for its `--workspace` flag; the fix is this action's input.
+    const error = isWorkspaceErrorMessage(cliError)
+      ? `${cliError.trim()}\n\n${WORKSPACE_INPUT_HINT}`
+      : cliError;
     console.warn(
       `tessl review run failed for ${skillFilePath} (exit code ${exitCode}): ${error}`,
     );
     return {
       skillPath: skillFilePath,
-      passed: threshold === 0 && !isAuthErrorMessage(error),
+      passed: threshold === 0 && !isSetupErrorMessage(error),
       score: -1,
       output: '',
       error,

@@ -8,6 +8,7 @@ import {
   effectivePass,
   effectiveScore,
   isAuthErrorMessage,
+  isWorkspaceErrorMessage,
   parseOptimizeIterations,
   runSkillOptimize,
   runSkillReview,
@@ -21,8 +22,9 @@ async function main(): Promise<void> {
   const rootPath = process.env.INPUT_PATH || '.';
   const shouldComment = process.env.INPUT_COMMENT !== 'false';
   const threshold = parseThreshold(process.env.INPUT_FAIL_THRESHOLD);
-  // Unset means "let the CLI resolve it" — from the repo's `tessl.json`, or the
-  // only workspace the token can see.
+  // Unset hands the choice to the CLI, which takes it from a `tessl.json` in the
+  // repository or from the token's workspace when it can see exactly one. A
+  // token with access to several fails below asking for this input.
   const workspace = process.env.INPUT_WORKSPACE?.trim() || undefined;
   const optimizeEnabled = process.env.INPUT_OPTIMIZE === 'true';
   const maxIterations = parseOptimizeIterations(process.env.INPUT_OPTIMIZE_ITERATIONS);
@@ -132,13 +134,25 @@ async function main(): Promise<void> {
     }
   }
 
-  // 5b. Auth failures are infrastructure failures, not score failures.
-  // `fail-threshold: 0` disables score gating only; it must not hide missing auth.
+  // 5b. Setup failures mean no review ran, so they are not score failures.
+  // `fail-threshold: 0` disables score gating only; it must not hide these.
   const authFailures = results.filter((r) => isAuthErrorMessage(r.error));
   if (authFailures.length > 0) {
     const summary = authFailures.map((r) => `  ${r.skillPath}`).join('\n');
     core.setFailed(
       `Tessl authentication failed for ${authFailures.length} skill(s). Configure the tessl-token input with a Tessl API token stored in a GitHub secret.\n${summary}`,
+    );
+    return;
+  }
+
+  const workspaceFailures = results.filter((r) => isWorkspaceErrorMessage(r.error));
+  if (workspaceFailures.length > 0) {
+    const summary = workspaceFailures.map((r) => `  ${r.skillPath}`).join('\n');
+    core.setFailed(
+      `Tessl could not determine which workspace to review against for ${workspaceFailures.length} skill(s). ` +
+        'Set the `workspace` input to the workspace name or ID (`tessl workspace list` shows them); ' +
+        'the CLI only picks one on its own when the token can see exactly one.\n' +
+        summary,
     );
     return;
   }

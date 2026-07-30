@@ -83,6 +83,8 @@ const {
   effectiveScore,
   effectivePass,
   isAuthErrorMessage,
+  isWorkspaceErrorMessage,
+  isSetupErrorMessage,
 } = await import('./skill-review.ts');
 const { postOrUpdateComment } = await import('./comment.ts');
 const { parseThreshold } = await import('./main.ts');
@@ -454,6 +456,33 @@ describe('runSkillReview', () => {
     expect(isAuthErrorMessage('Skill review requires you to be logged in. Run tessl login to log in.')).toBe(true);
     expect(isAuthErrorMessage('✘ 401 Unauthorized')).toBe(true);
     expect(isAuthErrorMessage('some validation error')).toBe(false);
+  });
+
+  test('an unresolvable workspace asks for the input and fails at threshold 0', async () => {
+    // What the CLI prints when it is given no workspace and the token can see
+    // more than one, which is the case for any multi-workspace account.
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn(
+      '',
+      'Missing required flag: --workspace\n\nUse --help to see usage',
+      1,
+    );
+
+    const result = await runSkillReview('skills/test/SKILL.md', 0);
+    // No review ran, so `fail-threshold: 0` must not let the check go green.
+    expect(result.passed).toBe(false);
+    expect(result.score).toBe(-1);
+    expect(result.error).toContain('Missing required flag: --workspace');
+    expect(result.error).toContain('Set the workspace input');
+    expect(result.error).toContain('tessl workspace list');
+  });
+
+  test('distinguishes workspace failures from score failures', () => {
+    expect(isWorkspaceErrorMessage('Missing required flag: --workspace')).toBe(true);
+    expect(isWorkspaceErrorMessage('Review run failed')).toBe(false);
+    expect(isSetupErrorMessage('✘ 401 Unauthorized')).toBe(true);
+    expect(isSetupErrorMessage('Missing required flag: --workspace')).toBe(true);
+    expect(isSetupErrorMessage('Skill has validation issues')).toBe(false);
   });
 
   test('malformed JSON output (unclosed brace)', async () => {

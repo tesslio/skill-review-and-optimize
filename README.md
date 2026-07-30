@@ -69,10 +69,11 @@ Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed
 
 That's it. Open a PR that changes a `SKILL.md` and the bot will comment.
 
-Reviews run against a Tessl workspace, which the CLI works out on its own — from a
-`tessl.json` in the repository, or from the only workspace your token can see. If your token
-can see several, the review fails with a message asking for one; add `workspace: <name or id>`
-to the review step to pick it (`tessl workspace list` shows yours).
+Reviews run against a Tessl workspace. The CLI picks it for you only in two cases: your
+repository has a `tessl.json` linked to one, or your token can see exactly one workspace.
+**Otherwise — including any token that can see several, which is usual for an organisation
+account — add `workspace: <name or id>` to the review step** (`tessl workspace list` shows
+what your token can see). Without it the review fails the check and says so.
 
 To pin the Tessl CLI version used for review runs, add `cli-version` to the review step:
 
@@ -112,7 +113,7 @@ When `optimize: true`, the threshold is checked against the **post-optimize achi
 
 | Input | Description | Default |
 |---|---|---|
-| `workspace` | Tessl workspace name or ID reviews run against (see `tessl workspace list`). Only needed when your token can see more than one workspace. | _(resolved automatically)_ |
+| `workspace` | Tessl workspace name or ID reviews run against (see `tessl workspace list`). The CLI only picks one itself when the repository has a linked `tessl.json` or the token can see exactly one workspace. | _(none)_ |
 | `tessl-token` | Tessl API token. Required for `mode: review`; not needed for `mode: apply`. [Get one here](https://tessl.io/account/api-keys). | _(required for review)_ |
 | `optimize` | Run AI-powered optimization after review | `false` |
 | `inline-suggestions` | Post inline `suggestion` blocks on the PR file diff | `false` |
