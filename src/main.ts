@@ -21,18 +21,10 @@ async function main(): Promise<void> {
   const rootPath = process.env.INPUT_PATH || '.';
   const shouldComment = process.env.INPUT_COMMENT !== 'false';
   const threshold = parseThreshold(process.env.INPUT_FAIL_THRESHOLD);
-  const workspace = (process.env.INPUT_WORKSPACE || '').trim();
+  // Unset means "let the CLI resolve it" — from the repo's `tessl.json`, or the
+  // only workspace the token can see.
+  const workspace = process.env.INPUT_WORKSPACE?.trim() || undefined;
   const optimizeEnabled = process.env.INPUT_OPTIMIZE === 'true';
-
-  // Tessl Review requires a workspace. Fail early with an actionable message.
-  if (!workspace) {
-    core.setFailed(
-      'The `workspace` input is required. Set it to your Tessl workspace name or ID ' +
-        '(see `tessl workspace list`), for example:\n' +
-        '    with:\n      workspace: your-workspace\n      tessl-token: ${{ secrets.TESSL_TOKEN }}',
-    );
-    return;
-  }
   const maxIterations = parseOptimizeIterations(process.env.INPUT_OPTIMIZE_ITERATIONS);
   const inlineSuggestionsEnabled = process.env.INPUT_INLINE_SUGGESTIONS === 'true';
   const reReviewOnSuggestion =
@@ -114,6 +106,10 @@ async function main(): Promise<void> {
               );
             } else if (optimizeResult.error) {
               console.log(`  ${result.skillPath}: optimize error: ${optimizeResult.error}`);
+            } else if (optimizeResult.afterScore > optimizeResult.beforeScore) {
+              console.log(
+                `  ${result.skillPath}: reaches ${optimizeResult.afterScore}% only via ${optimizeResult.bundleFilesChanged?.join(', ') ?? 'other bundle files'}, which this action does not apply`,
+              );
             } else {
               console.log(`  ${result.skillPath}: no optimization needed`);
             }

@@ -1,5 +1,5 @@
 import { readdir, rm, stat } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 /** Prefer the CLI installed by setup-tessl, falling back to the package binary for local runs. */
 function tesslBin(): string {
@@ -31,18 +31,59 @@ export async function warmupTessl(): Promise<void> {
   }
 }
 
+/** One judge's verdict: a score and reasoning per rubric dimension, plus prose. */
+interface Evaluation {
+  scores?: Record<string, { score?: number; reasoning?: string }>;
+  suggestions?: string[];
+  overall_assessment?: string;
+}
+
+interface JudgeResult {
+  normalizedScore?: number;
+  /** The rubric's scoring scale — `max` is the denominator for every dimension score. */
+  scale?: { min?: number; max?: number };
+  evaluation?: Evaluation | string;
+}
+
+/** The `tessl review run quality --json` payload. */
+interface ReviewRunJson {
+  review?: { reviewScore?: number };
+  validation?: {
+    overallPassed?: boolean;
+    errorCount?: number;
+    warningCount?: number;
+    checks?: Array<{ name?: string; status?: string; message?: string }>;
+  };
+  /** Keyed by judge id: `content` and `description` for the skill rubrics. */
+  judges?: Record<string, JudgeResult | undefined>;
+}
+
 /**
- * Format a score dimension as a table row with visual bar.
- * `max` is a fallback only — the judge's actual rubric scale isn't currently
- * exposed in the CLI's JSON output, so we widen to the observed score rather
- * than assume a fixed scale (which previously crashed once dimension scores
- * exceeded the hardcoded default of 3).
+ * Narrowest denominator to assume for a judge that reports dimension scores
+ * without a `scale`. Those payloads come from the older 1-3 rubric.
  */
-function scoreBar(score: number, max = 3): string {
-  const effectiveMax = Math.max(max, score);
-  const filled = '█'.repeat(score);
-  const empty = '░'.repeat(effectiveMax - score);
-  return `${filled}${empty} ${score}/${effectiveMax}`;
+const LEGACY_SCALE_MAX = 3;
+
+/**
+ * The denominator to render a judge's dimension scores against: its declared
+ * rubric scale, or — for a payload that omits one — the highest score it
+ * reported, so a rubric wider than 1-3 isn't rendered as full marks.
+ */
+function scaleMaxOf(judge: JudgeResult, evaluation: Evaluation): number {
+  if (judge.scale?.max !== undefined) return judge.scale.max;
+  const scores = Object.values(evaluation.scores ?? {}).map((s) => s.score ?? 0);
+  return Math.max(LEGACY_SCALE_MAX, ...scores);
+}
+
+/**
+ * Format one dimension's score as a bar. `max` is the rubric's top score, so a
+ * 1-5 rubric renders `████░ 4/5`. Both counts are clamped to the scale, since
+ * `repeat` rejects a negative count.
+ */
+function scoreBar(score: number, max: number): string {
+  const filled = '█'.repeat(Math.max(0, Math.min(score, max)));
+  const empty = '░'.repeat(Math.max(0, max - score));
+  return `${filled}${empty} ${score}/${max}`;
 }
 
 /** Remove filler words/phrases to keep table cells tight */
@@ -64,41 +105,34 @@ function trimFiller(text: string): string {
 }
 
 /**
- * Format the evaluation object into readable markdown.
- * Handles the known shape: { scores, overall_assessment, suggestions }
- * Falls back to JSON for unknown shapes.
+ * Render a judge's evaluation as one table row per rubric dimension, pairing
+ * each dimension with the suggestion at the same index. Empty when the judge
+ * reported no evaluation; falls back to JSON for one that carries no scores.
  */
-function formatEvaluation(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (typeof value !== 'object' || value === null) {
-    return JSON.stringify(value, null, 2);
+function formatEvaluation(judge: JudgeResult | undefined): string {
+  const evaluation = judge?.evaluation;
+  if (judge === undefined || evaluation === undefined) return '';
+  if (typeof evaluation === 'string') return evaluation;
+
+  const scores = evaluation.scores;
+  if (!scores) return JSON.stringify(evaluation, null, 2);
+
+  const scaleMax = scaleMaxOf(judge, evaluation);
+  const suggestions = evaluation.suggestions ?? [];
+  const entries = Object.entries(scores);
+  const parts = [
+    '| Dimension | Score | Detail | Suggestion |',
+    '|-----------|-------|--------|------------|',
+  ];
+  for (let i = 0; i < entries.length; i++) {
+    const [key, val] = entries[i]!;
+    const label = key.replace(/_/g, ' ');
+    const bar = typeof val.score === 'number' ? scoreBar(val.score, scaleMax) : '—';
+    const reasoning = trimFiller(val.reasoning ?? '').replace(/\|/g, '\\|');
+    const suggestion = trimFiller(suggestions[i] ?? '').replace(/\|/g, '\\|');
+    parts.push(`| **${label}** | ${bar} | ${reasoning} | ${suggestion} |`);
   }
-
-  const eval_ = value as Record<string, unknown>;
-  const parts: string[] = [];
-
-  // Format scores + suggestions as a single table
-  if (eval_.scores && typeof eval_.scores === 'object') {
-    const scores = eval_.scores as Record<
-      string,
-      { score?: number; reasoning?: string }
-    >;
-    const suggestions = Array.isArray(eval_.suggestions) ? eval_.suggestions as string[] : [];
-    const entries = Object.entries(scores);
-
-    parts.push('| Dimension | Score | Detail | Suggestion |');
-    parts.push('|-----------|-------|--------|------------|');
-    for (let i = 0; i < entries.length; i++) {
-      const [key, val] = entries[i]!;
-      const label = key.replace(/_/g, ' ');
-      const bar = typeof val.score === 'number' ? scoreBar(val.score) : '—';
-      const reasoning = trimFiller(val.reasoning ?? '').replace(/\|/g, '\\|');
-      const suggestion = trimFiller(suggestions[i] ?? '').replace(/\|/g, '\\|');
-      parts.push(`| **${label}** | ${bar} | ${reasoning} | ${suggestion} |`);
-    }
-  }
-
-  return parts.length > 0 ? parts.join('\n') : JSON.stringify(value, null, 2);
+  return parts.join('\n');
 }
 
 /**
@@ -152,6 +186,12 @@ export interface OptimizeResult {
   optimizedContent?: string;
   /** Pre-optimize file contents — used for rendering a diff in the PR comment. */
   originalContent?: string;
+  /**
+   * Files the fix changed other than SKILL.md, relative to the skill directory.
+   * The PR diff, the inline suggestions, and `/apply-optimize` all carry
+   * SKILL.md alone, so these are reported to the author rather than applied.
+   */
+  bundleFilesChanged?: string[];
   error?: string;
 }
 
@@ -162,36 +202,13 @@ export interface SkillReviewResult {
   output: string;
   error?: string;
   optimize?: OptimizeResult;
-  /**
-   * Required changes surfaced prominently (not hidden in a <details>):
-   * failed/warning validation checks plus the content judge's suggestions.
-   */
-  requiredChanges?: string[];
-  /** One-line summary from the content judge, if present. */
+  /** Validation checks that didn't pass, rendered above the collapsed details. */
+  validationIssues?: string[];
+  /** The content judge's one-line summary, when the payload carries one. */
   overallAssessment?: string;
 }
 
-interface Evaluation {
-  scores?: Record<string, { score?: number; reasoning?: string }>;
-  suggestions?: string[];
-  overall_assessment?: string;
-}
-
-interface ReviewRunJson {
-  review?: { reviewScore?: number };
-  validation?: {
-    overallPassed?: boolean;
-    errorCount?: number;
-    warningCount?: number;
-    checks?: Array<{ name?: string; status?: string; message?: string }>;
-  };
-  judges?: {
-    content?: { normalizedScore?: number; evaluation?: unknown };
-    description?: { normalizedScore?: number; evaluation?: unknown };
-  };
-}
-
-/** Score from the new `tessl review run --json` shape (0-100). */
+/** Review score on a 0-100 scale. */
 function reviewScoreFrom(parsed: ReviewRunJson): number {
   return typeof parsed.review?.reviewScore === 'number'
     ? parsed.review.reviewScore
@@ -199,28 +216,26 @@ function reviewScoreFrom(parsed: ReviewRunJson): number {
 }
 
 /**
- * Render validation checks: the failing/warning messages (for prominent
- * display) and a markdown block listing anything that didn't pass.
+ * Split the validation checks into the ones worth showing up front — anything
+ * that didn't pass, each with its own error/warning icon — and a one-line
+ * tally for the collapsed details. Each check renders in exactly one of them.
  */
 function formatValidation(
   validation: ReviewRunJson['validation'],
-): { failures: string[]; markdown: string } {
+): { issues: string[]; markdown: string } {
   const checks = validation?.checks ?? [];
-  if (checks.length === 0) return { failures: [], markdown: '' };
+  if (checks.length === 0) return { issues: [], markdown: '' };
 
   const notPassed = checks.filter((c) => c.status && c.status !== 'passed');
-  const failures = notPassed.map((c) => c.message ?? c.name ?? 'validation issue');
+  const issues = notPassed.map((c) => {
+    const icon = c.status === 'warning' ? '⚠️' : '❌';
+    const detail = c.message ? ` — ${c.message}` : '';
+    return `${icon} **${c.name ?? 'validation issue'}**${detail}`;
+  });
 
-  const parts: string[] = ['### Validation Checks', ''];
-  if (notPassed.length === 0) {
-    parts.push(`✅ All ${checks.length} checks passed.`);
-  } else {
-    for (const c of notPassed) {
-      const icon = c.status === 'warning' ? '⚠️' : '❌';
-      parts.push(`- ${icon} **${c.name}** — ${c.message ?? ''}`);
-    }
-  }
-  return { failures, markdown: parts.join('\n') };
+  const passedCount = checks.length - notPassed.length;
+  const markdown = `### Validation Checks\n\n${passedCount}/${checks.length} checks passed.`;
+  return { issues, markdown };
 }
 
 export function isAuthErrorMessage(message: string | undefined): boolean {
@@ -261,25 +276,45 @@ export function effectivePass(
   return effectiveScore(result) >= threshold;
 }
 
+/**
+ * Argv for a single blocking quality review of `skillDir`.
+ *
+ * `--threshold 0` is the CLI's explicit "never fail" value. Without it the
+ * command exits non-zero whenever `validation.overallPassed` is false, callers
+ * bail on the exit code before parsing the JSON the CLI already printed, and a
+ * skill with validation issues renders as an error instead of a score plus the
+ * issues themselves. Gating belongs to the action (see `effectivePass`), so the
+ * CLI must never gate.
+ *
+ * `--workspace` is omitted when the input is unset: the CLI then resolves the
+ * workspace from the repo's `tessl.json`, or picks the only one the token can
+ * see, and errors with an actionable message when neither applies.
+ */
+function reviewRunArgs(skillDir: string, workspace: string | undefined): string[] {
+  return [
+    tesslBin(),
+    'review',
+    'run',
+    'quality',
+    '--json',
+    ...(workspace ? ['--workspace', workspace] : []),
+    '--threshold',
+    '0',
+    skillDir,
+  ];
+}
+
 export async function runSkillReview(
   skillFilePath: string,
   threshold: number,
-  workspace: string,
+  workspace?: string,
 ): Promise<SkillReviewResult> {
   const skillDir = dirname(skillFilePath);
 
-  // Tessl Review (replaces the deprecated `tessl skill review`). Single
-  // blocking call; a workspace is now required. `--threshold 0` is the CLI's
-  // explicit "never fail" value: without it, `review run quality` exits
-  // non-zero whenever `validation.overallPassed` is false, and we'd bail on the
-  // non-zero exit below — before parsing the JSON the CLI already printed —
-  // rendering a validation-failing skill as ERROR instead of a score plus its
-  // required changes. Gating stays in the action (see `effectivePass`), so the
-  // CLI itself must never gate.
-  const proc = Bun.spawn(
-    [tesslBin(), 'review', 'run', 'quality', '--json', '--workspace', workspace, '--threshold', '0', skillDir],
-    { stdout: 'pipe', stderr: 'pipe' },
-  );
+  const proc = Bun.spawn(reviewRunArgs(skillDir, workspace), {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
 
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -329,40 +364,29 @@ export async function runSkillReview(
 
   const score = reviewScoreFrom(parsed);
 
-  const contentEval = parsed.judges?.content?.evaluation as Evaluation | undefined;
-  const { failures: validationFailures, markdown: validationMarkdown } =
+  const content = parsed.judges?.content;
+  const { issues: validationIssues, markdown: validationMarkdown } =
     formatValidation(parsed.validation);
 
-  const suggestions =
-    contentEval && Array.isArray(contentEval.suggestions)
-      ? contentEval.suggestions.filter((s): s is string => typeof s === 'string')
-      : [];
-  const requiredChanges = [...validationFailures, ...suggestions];
+  const contentEval = content?.evaluation;
   const overallAssessment =
-    contentEval && typeof contentEval.overall_assessment === 'string'
-      ? contentEval.overall_assessment
-      : undefined;
+    typeof contentEval === 'object' ? contentEval.overall_assessment : undefined;
 
   const outputParts: string[] = [];
   if (validationMarkdown) outputParts.push(validationMarkdown);
-  if (parsed.judges?.content?.evaluation) {
-    outputParts.push(
-      '### Review Details\n\n' + formatEvaluation(parsed.judges.content.evaluation),
-    );
-  }
-  if (parsed.judges?.description?.evaluation) {
-    outputParts.push(
-      '### Description Review\n\n' +
-        formatEvaluation(parsed.judges.description.evaluation),
-    );
-  }
+
+  const contentDetails = formatEvaluation(content);
+  if (contentDetails) outputParts.push(`### Review Details\n\n${contentDetails}`);
+
+  const descriptionDetails = formatEvaluation(parsed.judges?.description);
+  if (descriptionDetails) outputParts.push(`### Description Review\n\n${descriptionDetails}`);
 
   return {
     skillPath: skillFilePath,
     passed: threshold === 0 || score >= threshold,
     score,
     output: outputParts.length > 0 ? outputParts.join('\n\n') : stdout,
-    requiredChanges: requiredChanges.length > 0 ? requiredChanges : undefined,
+    validationIssues: validationIssues.length > 0 ? validationIssues : undefined,
     overallAssessment,
   };
 }
@@ -411,19 +435,27 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
-/** Whether any file under `dir` differs from the snapshot (added, removed, or modified). */
-async function bundleChanged(
+/**
+ * Files under `dir` that differ from the snapshot — added, modified, or removed
+ * — as paths relative to `dir`. Returns `null` when the directory can't be
+ * re-enumerated, which is a different answer from an empty list.
+ */
+async function changedBundleFiles(
   dir: string,
   snapshot: Map<string, Uint8Array>,
-): Promise<boolean> {
+): Promise<string[] | null> {
   const current = await snapshotBundle(dir);
-  if (!current) return false;
-  if (current.size !== snapshot.size) return true;
+  if (!current) return null;
+
+  const changed: string[] = [];
   for (const [rel, bytes] of current) {
     const before = snapshot.get(rel);
-    if (!before || !bytesEqual(before, bytes)) return true;
+    if (!before || !bytesEqual(before, bytes)) changed.push(rel);
   }
-  return false;
+  for (const rel of snapshot.keys()) {
+    if (!current.has(rel)) changed.push(rel);
+  }
+  return changed;
 }
 
 /**
@@ -452,32 +484,30 @@ export async function runSkillOptimize(
   skillFilePath: string,
   beforeScore: number,
   maxIterations: number,
-  workspace: string,
+  workspace?: string,
 ): Promise<OptimizeResult> {
   const skillDir = dirname(skillFilePath);
+  const skillFileName = basename(skillFilePath);
 
-  // SKILL.md is the basis for the PR diff, inline suggestions, and
-  // /apply-optimize (all SKILL.md-centric), so read it up front.
+  // SKILL.md alone drives the PR diff, the inline suggestions, and
+  // /apply-optimize, so read it up front to compare against afterwards.
   const originalContent = await Bun.file(skillFilePath).text();
 
-  // Snapshot the whole bundle so a bundle-wide `review fix` can be fully
-  // reverted (not just SKILL.md) and improvements that live outside SKILL.md
-  // are still detected. Falls back to single-file handling if the directory
-  // can't be enumerated.
+  // `review fix` rewrites the whole bundle, so a full snapshot is what makes it
+  // revertible and what tells us whether anything outside SKILL.md changed.
+  // A directory that can't be enumerated leaves only SKILL.md to work with.
   const bundle = await snapshotBundle(skillDir);
   const restore = async () => {
     if (bundle) await restoreBundle(skillDir, bundle);
     else await Bun.write(skillFilePath, originalContent);
   };
 
-  // Tessl Review's `review fix` is the automated review-and-fix loop that
-  // replaces the old `skill review --optimize`. With --yes it applies the
-  // improved skill to disk, which we detect and (in suggestion-only mode)
-  // revert below after capturing an after-score.
+  // `--yes` applies the improved bundle to disk without prompting, which is
+  // what lets us score it below before restoring the author's version.
   const proc = Bun.spawn(
     [
       tesslBin(), 'review', 'fix',
-      '--workspace', workspace,
+      ...(workspace ? ['--workspace', workspace] : []),
       '--yes',
       '--max-iterations', String(maxIterations),
       skillDir,
@@ -506,26 +536,24 @@ export async function runSkillOptimize(
     };
   }
 
-  // Read potentially modified SKILL.md (basis for the diff/apply path).
   const newContent = await Bun.file(skillFilePath).text();
   const skillMdChanged = newContent !== originalContent;
 
-  // A fix can improve the skill via files other than SKILL.md; detect changes
-  // across the whole bundle so the after-score reflects them (a single-file
-  // check would misread such a run as "no change" and keep a stale score).
-  const contentChanged = bundle
-    ? await bundleChanged(skillDir, bundle)
-    : skillMdChanged;
+  // A fix can raise the score through reference files rather than SKILL.md, so
+  // the whole bundle decides whether an after-score is worth fetching. When the
+  // directory can't be re-read, SKILL.md is the only comparison available.
+  const changedFiles = bundle ? await changedBundleFiles(skillDir, bundle) : null;
+  const bundleFilesChanged = (changedFiles ?? []).filter(
+    (rel) => rel !== skillFileName,
+  );
+  const contentChanged = changedFiles ? changedFiles.length > 0 : skillMdChanged;
 
-  // Get after-score by running a fresh review of the improved skill.
   let afterScore = beforeScore;
   if (contentChanged) {
-    // `--threshold 0` for parity with runSkillReview: never let the CLI gate;
-    // the after-score is read purely from the JSON payload.
-    const reviewProc = Bun.spawn(
-      [tesslBin(), 'review', 'run', 'quality', '--json', '--workspace', workspace, '--threshold', '0', skillDir],
-      { stdout: 'pipe', stderr: 'pipe' },
-    );
+    const reviewProc = Bun.spawn(reviewRunArgs(skillDir, workspace), {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     const reviewStdout = await new Response(reviewProc.stdout).text();
     await reviewProc.exited;
     const jsonStr = extractJson(reviewStdout);
@@ -538,17 +566,15 @@ export async function runSkillOptimize(
     }
   }
 
-  // Restore the bundle (suggestion-only mode).
+  // The author's version goes back on disk; the improvement is offered as a
+  // suggestion rather than a commit.
   await restore();
 
-  // Only treat the run as "optimized" when it produced a score improvement
-  // that lands in SKILL.md. The diff, inline suggestions, and /apply-optimize
-  // all operate on SKILL.md, so a run that raises the score only via other
-  // bundle files (e.g. references) is scored but not one-click-applyable
-  // through this action — a known v2 limitation. A change that doesn't beat
-  // the before-score is likewise treated as no-improvement-available: we keep
-  // the user's version and the comment falls into the affirming
-  // "no further improvements available" branch.
+  // `optimized` means "this action can offer the improvement", which requires
+  // both a better score and a changed SKILL.md — the only file the diff, the
+  // inline suggestions, and /apply-optimize carry. An improvement that lives
+  // in reference files reports its score through `bundleFilesChanged` instead,
+  // and a run that fails to beat the before-score reports no improvement.
   const optimized = skillMdChanged && afterScore > beforeScore;
 
   return {
@@ -557,5 +583,7 @@ export async function runSkillOptimize(
     afterScore,
     optimizedContent: optimized ? newContent : undefined,
     originalContent: optimized ? originalContent : undefined,
+    bundleFilesChanged:
+      bundleFilesChanged.length > 0 ? bundleFilesChanged : undefined,
   };
 }
