@@ -458,6 +458,33 @@ describe('runSkillReview', () => {
     expect(isAuthErrorMessage('some validation error')).toBe(false);
   });
 
+  test('detects the auth failures Tessl Review reports', () => {
+    // With no stored credentials at all.
+    expect(
+      isAuthErrorMessage(
+        '✘ Please authenticate with Tessl to continue. Run `tessl login` to sign up or log in.',
+      ),
+    ).toBe(true);
+    // With a token the API rejects.
+    expect(
+      isAuthErrorMessage('✘ Authentication failed. Please run `tessl login` to authenticate.'),
+    ).toBe(true);
+  });
+
+  test('an unauthenticated run fails the check at threshold 0', async () => {
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn(
+      '',
+      '✘ Please authenticate with Tessl to continue. Run `tessl login` to sign up or log in.',
+      1,
+    );
+
+    const result = await runSkillReview('skills/test/SKILL.md', 0, WS);
+    // No review ran, so `fail-threshold: 0` must not let the check go green.
+    expect(result.passed).toBe(false);
+    expect(result.score).toBe(-1);
+  });
+
   test('an unresolvable workspace asks for the input and fails at threshold 0', async () => {
     // What the CLI prints when it is given no workspace and the token can see
     // more than one, which is the case for any multi-workspace account.
@@ -537,10 +564,24 @@ describe('runSkillReview', () => {
 
   test('distinguishes workspace failures from score failures', () => {
     expect(isWorkspaceErrorMessage('Missing required flag: --workspace')).toBe(true);
+    expect(isWorkspaceErrorMessage('✘ Workspace not found: typo-workspace')).toBe(true);
     expect(isWorkspaceErrorMessage('Review run failed')).toBe(false);
     expect(isSetupErrorMessage('✘ 401 Unauthorized')).toBe(true);
     expect(isSetupErrorMessage('Missing required flag: --workspace')).toBe(true);
     expect(isSetupErrorMessage('Skill has validation issues')).toBe(false);
+  });
+
+  test('a workspace the token cannot see fails the check at threshold 0', async () => {
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn('', '✘ Workspace not found: typo-workspace', 1);
+
+    const result = await runSkillReview('skills/test/SKILL.md', 0, 'typo-workspace');
+    expect(result.passed).toBe(false);
+    expect(result.score).toBe(-1);
+    expect(result.error).toContain('Workspace not found');
+    expect(result.error).toContain('Check the workspace input');
+    // The set-it hint is for a missing workspace; this one is already set.
+    expect(result.error).not.toContain('cannot choose for you');
   });
 
   test('malformed JSON output (unclosed brace)', async () => {

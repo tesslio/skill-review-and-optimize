@@ -23,7 +23,7 @@ inputs:
     description: 'Max optimization iterations (1-10)'
     default: '3'
   cli-version:
-    description: 'Tessl CLI version to install (for example "0.73.0", or "latest")'
+    description: 'Tessl CLI version to install (for example "0.90.0", or "latest"). Reviews need 0.90.0 or later.'
     default: 'latest'
   inline-suggestions:
     description: 'Post optimization changes as inline GitHub `suggestion` blocks on the PR diff (in addition to the summary comment). Lets authors cherry-pick individual changes.'
