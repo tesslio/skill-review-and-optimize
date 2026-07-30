@@ -477,6 +477,46 @@ describe('runSkillReview', () => {
     expect(result.error).toContain('tessl workspace list');
   });
 
+  test('a skill that fails validation reports its errors, not an action error', async () => {
+    // The shape a validation-failing skill actually comes back as: the judges
+    // never run, so there is no score and no judges — only the errors that say
+    // what to fix. Rendering that as an action error would bury them.
+    const jsonOutput = JSON.stringify({
+      reviewRunId: 'rr_1',
+      validation: {
+        overallPassed: false,
+        errorCount: 2,
+        warningCount: 0,
+        checks: [
+          { name: 'body_present', status: 'passed', message: 'SKILL.md body is present' },
+          {
+            name: 'name_field',
+            status: 'error',
+            message: 'Must contain only lowercase letters, numbers, and hyphens',
+          },
+          {
+            name: 'description_field',
+            status: 'error',
+            message: "'description' field is missing from frontmatter",
+          },
+        ],
+      },
+      review: { reviewScore: null },
+    });
+
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
+
+    const result = await runSkillReview('a/SKILL.md', 70, WS);
+    expect(result.error).toBeUndefined();
+    expect(result.score).toBe(0);
+    expect(result.passed).toBe(false);
+    expect(result.validationIssues).toEqual([
+      '❌ **name_field** — Must contain only lowercase letters, numbers, and hyphens',
+      "❌ **description_field** — 'description' field is missing from frontmatter",
+    ]);
+  });
+
   test('a payload with no review score errors instead of reporting a judge score', async () => {
     // `review.reviewScore` is the review's own number; a judge's normalizedScore
     // measures one rubric and sits far from it (0.2 against a review of 62), so

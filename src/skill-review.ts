@@ -399,8 +399,13 @@ export async function runSkillReview(
     };
   }
 
-  const score = reviewScoreFrom(parsed);
-  if (score === null) {
+  // A skill that fails validation is scored `null` because the judges never
+  // run. That is a review to report — the validation errors below are exactly
+  // what the author needs — so it scores 0 rather than erroring. A score
+  // missing for any other reason has no such explanation.
+  const validationFailed = parsed.validation?.overallPassed === false;
+  const reviewScore = reviewScoreFrom(parsed);
+  if (reviewScore === null && !validationFailed) {
     console.warn(`Review output carried no score for ${skillFilePath}`);
     return {
       skillPath: skillFilePath,
@@ -410,6 +415,7 @@ export async function runSkillReview(
       error: 'Review completed without a score',
     };
   }
+  const score = reviewScore ?? 0;
 
   const content = parsed.judges?.content;
   const { issues: validationIssues, markdown: validationMarkdown } =
