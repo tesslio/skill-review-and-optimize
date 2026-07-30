@@ -12,6 +12,11 @@ Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed
 > Reviews run through **Tessl Review** (`tessl review run` / `tessl review fix`), which
 > needs Tessl CLI **0.84.0 or later**. The default `cli-version: latest` gets that
 > automatically; if you pin `cli-version`, pin 0.84.0 or later.
+>
+> **Upgrading, and your token can see more than one Tessl workspace?** Add the
+> [`workspace`](#inputs-reference) input. Reviews run against one workspace, and the CLI can
+> only choose for you when your token can see exactly one — otherwise the check fails asking
+> for it.
 
 ## What you'll see when a PR changes a SKILL.md
 
