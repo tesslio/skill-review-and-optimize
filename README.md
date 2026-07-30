@@ -80,11 +80,11 @@ To pin the Tessl CLI version used for review runs, add `cli-version` to the revi
 - uses: tesslio/skill-review-and-optimize@93b965b93a5b20dcde529dfd923fcfed43797de4
   with:
     workspace: your-workspace
-    cli-version: 0.73.0
+    cli-version: 0.84.0
     tessl-token: ${{ secrets.TESSL_API_TOKEN }}
 ```
 
-Omit `cli-version` to keep using the latest Tessl CLI. Set it to a specific version when you need reproducible runs or a short rollout delay for new CLI releases.
+Omit `cli-version` to keep using the latest Tessl CLI. Set it to a specific version when you need reproducible runs or a short rollout delay for new CLI releases. Pin **0.84.0 or later** — this action needs `tessl review run` (CLI 0.82.0) and `tessl review fix` (CLI 0.84.0), so earlier versions will fail.
 
 The CLI is only installed for `mode: review`; `/apply-optimize` does not need the Tessl CLI.
 
@@ -120,7 +120,7 @@ When `optimize: true`, the threshold is checked against the **post-optimize achi
 | `inline-suggestions` | Post inline `suggestion` blocks on the PR file diff | `false` |
 | `fail-threshold` | Minimum score (0-100) to pass the check. `0` = never fail. | `0` |
 | `optimize-iterations` | Max optimization iterations (1-10) | `3` |
-| `cli-version` | Tessl CLI version to install, for example `0.73.0` or `latest` | `latest` |
+| `cli-version` | Tessl CLI version to install, for example `0.84.0` or `latest` (needs ≥ 0.84.0 for `review run` + `review fix`) | `latest` |
 | `mode` | `review` (default) or `apply` (used by the `/apply-optimize` job) | `review` |
 | `path` | Root path to search for `SKILL.md` files (for monorepos) | `.` |
 | `comment` | Whether to post the summary comment | `true` |

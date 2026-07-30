@@ -1,4 +1,8 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { SkillReviewResult } from './skill-review.ts';
 
 // ---------------------------------------------------------------------------
@@ -350,6 +354,8 @@ describe('runSkillReview', () => {
         '--json',
         '--workspace',
         WS,
+        '--threshold',
+        '0',
         'skills/test',
       ]);
     } finally {
@@ -1569,5 +1575,114 @@ describe('isSuggestionAcceptanceCommit', () => {
   test('returns false when getCommit throws (soft-fail)', async () => {
     getCommitMock.mockImplementationOnce(() => Promise.reject(new Error('API down')));
     expect(await isSuggestionAcceptanceCommit()).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. runSkillOptimize — bundle snapshot/restore (real temp dirs)
+//
+// `tessl review fix` operates on the whole skill bundle, so these tests use a
+// real directory and only mock Bun.spawn (which stands in for the CLI and
+// mutates the bundle as a side effect). They prove: (1) files the fix adds or
+// edits outside SKILL.md are reverted — no leak into the runner workspace, and
+// (2) a fix that changes only non-SKILL.md files is still scored (bundle-level
+// change detection), rather than misread as "no change" with a stale score.
+// ---------------------------------------------------------------------------
+
+describe('runSkillOptimize (bundle snapshot/restore)', () => {
+  const WS = 'test-workspace';
+  let originalSpawn: typeof Bun.spawn;
+
+  beforeEach(() => {
+    originalSpawn = Bun.spawn;
+  });
+  afterEach(() => {
+    // @ts-ignore restoring original
+    Bun.spawn = originalSpawn;
+  });
+
+  const streamOf = (text: string) =>
+    new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(text));
+        c.close();
+      },
+    });
+
+  // Mock the CLI: `review fix` runs `mutate(dir)` as its on-disk side effect;
+  // `review run quality` returns the given JSON score payload.
+  const cliMock = (mutate: (dir: string) => void, reviewJson: string) =>
+    mock((cmd: string[]) => {
+      const dir = cmd[cmd.length - 1]!;
+      const isFix = cmd.includes('fix');
+      if (isFix) mutate(dir);
+      return {
+        stdout: streamOf(isFix ? '' : reviewJson),
+        stderr: streamOf(''),
+        exited: Promise.resolve(0),
+      };
+    });
+
+  test('reverts non-SKILL.md bundle changes and still scores the run', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'skopt-'));
+    const skillPath = join(dir, 'SKILL.md');
+    const origSkill = '---\nname: t\n---\nBody';
+    await writeFile(skillPath, origSkill);
+    await mkdir(join(dir, 'references'));
+    await writeFile(join(dir, 'references', 'helper.md'), 'orig helper');
+
+    // Fix touches only bundle files, not SKILL.md.
+    // @ts-expect-error mock assignment
+    Bun.spawn = cliMock((d) => {
+      writeFileSync(join(d, 'references', 'new.md'), 'added by fix');
+      writeFileSync(join(d, 'references', 'helper.md'), 'edited by fix');
+    }, JSON.stringify({ review: { reviewScore: 88 } }));
+
+    try {
+      const result = await runSkillOptimize(skillPath, 70, 3, WS);
+      // Bundle change detected → after-score review ran despite SKILL.md unchanged.
+      expect(result.afterScore).toBe(88);
+      // No SKILL.md change → not one-click-applyable through this action.
+      expect(result.optimized).toBe(false);
+      expect(result.optimizedContent).toBeUndefined();
+      // No leak: added file removed, edited file restored, SKILL.md intact.
+      const entries = await readdir(dir, { recursive: true });
+      expect(entries).not.toContain(join('references', 'new.md'));
+      expect(await readFile(join(dir, 'references', 'helper.md'), 'utf8')).toBe('orig helper');
+      expect(await readFile(skillPath, 'utf8')).toBe(origSkill);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('reverts an added bundle file when SKILL.md improves', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'skopt-'));
+    const skillPath = join(dir, 'SKILL.md');
+    const origSkill = '---\nname: t\n---\nBefore';
+    const improvedSkill = '---\nname: t\n---\nAfter (better)';
+    await writeFile(skillPath, origSkill);
+    await mkdir(join(dir, 'references'));
+    await writeFile(join(dir, 'references', 'helper.md'), 'keep me');
+
+    // @ts-expect-error mock assignment
+    Bun.spawn = cliMock((d) => {
+      writeFileSync(join(d, 'SKILL.md'), improvedSkill);
+      writeFileSync(join(d, 'references', 'extra.md'), 'added');
+    }, JSON.stringify({ review: { reviewScore: 90 } }));
+
+    try {
+      const result = await runSkillOptimize(skillPath, 60, 3, WS);
+      expect(result.optimized).toBe(true);
+      expect(result.afterScore).toBe(90);
+      expect(result.optimizedContent).toBe(improvedSkill);
+      expect(result.originalContent).toBe(origSkill);
+      // Restored: SKILL.md reverted, added file gone, helper untouched.
+      expect(await readFile(skillPath, 'utf8')).toBe(origSkill);
+      const entries = await readdir(dir, { recursive: true });
+      expect(entries).not.toContain(join('references', 'extra.md'));
+      expect(await readFile(join(dir, 'references', 'helper.md'), 'utf8')).toBe('keep me');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

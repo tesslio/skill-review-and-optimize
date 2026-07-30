@@ -1,3 +1,4 @@
+import { readdir, rm, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
 /** Prefer the CLI installed by setup-tessl, falling back to the package binary for local runs. */
@@ -261,9 +262,15 @@ export async function runSkillReview(
   const skillDir = dirname(skillFilePath);
 
   // Tessl Review (replaces the deprecated `tessl skill review`). Single
-  // blocking call; a workspace is now required.
+  // blocking call; a workspace is now required. `--threshold 0` is the CLI's
+  // explicit "never fail" value: without it, `review run quality` exits
+  // non-zero whenever `validation.overallPassed` is false, and we'd bail on the
+  // non-zero exit below — before parsing the JSON the CLI already printed —
+  // rendering a validation-failing skill as ERROR instead of a score plus its
+  // required changes. Gating stays in the action (see `effectivePass`), so the
+  // CLI itself must never gate.
   const proc = Bun.spawn(
-    [tesslBin(), 'review', 'run', 'quality', '--json', '--workspace', workspace, skillDir],
+    [tesslBin(), 'review', 'run', 'quality', '--json', '--workspace', workspace, '--threshold', '0', skillDir],
     { stdout: 'pipe', stderr: 'pipe' },
   );
 
@@ -363,6 +370,77 @@ export function parseOptimizeIterations(value: string | undefined): number {
   return num;
 }
 
+/**
+ * Snapshot every file under a skill bundle directory as `relpath -> bytes`.
+ *
+ * `tessl review fix` operates on the whole bundle — it can add, edit, or delete
+ * files anywhere in the skill directory (references included), not just
+ * SKILL.md — so a single-file snapshot cannot fully revert it. Returns `null`
+ * if the directory can't be enumerated; callers fall back to single-file
+ * handling.
+ */
+async function snapshotBundle(
+  dir: string,
+): Promise<Map<string, Uint8Array> | null> {
+  try {
+    const snapshot = new Map<string, Uint8Array>();
+    const entries = await readdir(dir, { recursive: true });
+    for (const rel of entries) {
+      const info = await stat(join(dir, rel)).catch(() => null);
+      if (!info?.isFile()) continue;
+      snapshot.set(rel, new Uint8Array(await Bun.file(join(dir, rel)).arrayBuffer()));
+    }
+    return snapshot;
+  } catch {
+    return null;
+  }
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/** Whether any file under `dir` differs from the snapshot (added, removed, or modified). */
+async function bundleChanged(
+  dir: string,
+  snapshot: Map<string, Uint8Array>,
+): Promise<boolean> {
+  const current = await snapshotBundle(dir);
+  if (!current) return false;
+  if (current.size !== snapshot.size) return true;
+  for (const [rel, bytes] of current) {
+    const before = snapshot.get(rel);
+    if (!before || !bytesEqual(before, bytes)) return true;
+  }
+  return false;
+}
+
+/**
+ * Restore a skill bundle to a prior snapshot: remove any file the fix added,
+ * then rewrite every snapshotted file (covering both edits and deletions).
+ */
+async function restoreBundle(
+  dir: string,
+  snapshot: Map<string, Uint8Array>,
+): Promise<void> {
+  const current = await readdir(dir, { recursive: true }).catch(
+    () => [] as string[],
+  );
+  for (const rel of current) {
+    const info = await stat(join(dir, rel)).catch(() => null);
+    if (info?.isFile() && !snapshot.has(rel)) {
+      await rm(join(dir, rel), { force: true });
+    }
+  }
+  for (const [rel, bytes] of snapshot) {
+    await Bun.write(join(dir, rel), bytes);
+  }
+}
+
 export async function runSkillOptimize(
   skillFilePath: string,
   beforeScore: number,
@@ -371,8 +449,19 @@ export async function runSkillOptimize(
 ): Promise<OptimizeResult> {
   const skillDir = dirname(skillFilePath);
 
-  // Read original content to detect changes and restore afterward
+  // SKILL.md is the basis for the PR diff, inline suggestions, and
+  // /apply-optimize (all SKILL.md-centric), so read it up front.
   const originalContent = await Bun.file(skillFilePath).text();
+
+  // Snapshot the whole bundle so a bundle-wide `review fix` can be fully
+  // reverted (not just SKILL.md) and improvements that live outside SKILL.md
+  // are still detected. Falls back to single-file handling if the directory
+  // can't be enumerated.
+  const bundle = await snapshotBundle(skillDir);
+  const restore = async () => {
+    if (bundle) await restoreBundle(skillDir, bundle);
+    else await Bun.write(skillFilePath, originalContent);
+  };
 
   // Tessl Review's `review fix` is the automated review-and-fix loop that
   // replaces the old `skill review --optimize`. With --yes it applies the
@@ -399,8 +488,8 @@ export async function runSkillOptimize(
     // Log stderr for debugging (strip any token-like strings)
     const safeStderr = stderr.replace(/[A-Za-z0-9_-]{20,}/g, '***');
     console.warn(`tessl review fix stderr: ${safeStderr}`);
-    // Restore original in case of partial write
-    await Bun.write(skillFilePath, originalContent);
+    // Restore in case of partial write
+    await restore();
     // Do not include raw stderr in error — it may contain auth token from tessl CLI
     return {
       optimized: false,
@@ -410,15 +499,24 @@ export async function runSkillOptimize(
     };
   }
 
-  // Read potentially modified content
+  // Read potentially modified SKILL.md (basis for the diff/apply path).
   const newContent = await Bun.file(skillFilePath).text();
-  const contentChanged = newContent !== originalContent;
+  const skillMdChanged = newContent !== originalContent;
+
+  // A fix can improve the skill via files other than SKILL.md; detect changes
+  // across the whole bundle so the after-score reflects them (a single-file
+  // check would misread such a run as "no change" and keep a stale score).
+  const contentChanged = bundle
+    ? await bundleChanged(skillDir, bundle)
+    : skillMdChanged;
 
   // Get after-score by running a fresh review of the improved skill.
   let afterScore = beforeScore;
   if (contentChanged) {
+    // `--threshold 0` for parity with runSkillReview: never let the CLI gate;
+    // the after-score is read purely from the JSON payload.
     const reviewProc = Bun.spawn(
-      [tesslBin(), 'review', 'run', 'quality', '--json', '--workspace', workspace, skillDir],
+      [tesslBin(), 'review', 'run', 'quality', '--json', '--workspace', workspace, '--threshold', '0', skillDir],
       { stdout: 'pipe', stderr: 'pipe' },
     );
     const reviewStdout = await new Response(reviewProc.stdout).text();
@@ -433,15 +531,18 @@ export async function runSkillOptimize(
     }
   }
 
-  // Restore original file (suggestion-only mode)
-  await Bun.write(skillFilePath, originalContent);
+  // Restore the bundle (suggestion-only mode).
+  await restore();
 
-  // Only treat the run as "optimized" when it produced a score improvement.
-  // A run that changes content but doesn't beat the before-score is treated
-  // as no-improvement-available downstream: we keep the user's version, omit
-  // the diff/inline-suggestions, and the comment falls into the affirming
+  // Only treat the run as "optimized" when it produced a score improvement
+  // that lands in SKILL.md. The diff, inline suggestions, and /apply-optimize
+  // all operate on SKILL.md, so a run that raises the score only via other
+  // bundle files (e.g. references) is scored but not one-click-applyable
+  // through this action — a known v2 limitation. A change that doesn't beat
+  // the before-score is likewise treated as no-improvement-available: we keep
+  // the user's version and the comment falls into the affirming
   // "no further improvements available" branch.
-  const optimized = contentChanged && afterScore > beforeScore;
+  const optimized = skillMdChanged && afterScore > beforeScore;
 
   return {
     optimized,
