@@ -1,4 +1,8 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { SkillReviewResult } from './skill-review.ts';
 
 // ---------------------------------------------------------------------------
@@ -79,6 +83,8 @@ const {
   effectiveScore,
   effectivePass,
   isAuthErrorMessage,
+  isWorkspaceErrorMessage,
+  isSetupErrorMessage,
 } = await import('./skill-review.ts');
 const { postOrUpdateComment } = await import('./comment.ts');
 const { parseThreshold } = await import('./main.ts');
@@ -298,34 +304,66 @@ describe('runSkillReview', () => {
     Bun.spawn = originalSpawn;
   });
 
+  const WS = 'test-workspace';
+
   test('successful review with JSON output', async () => {
     const jsonOutput = JSON.stringify({
-      contentJudge: {
-        normalizedScore: 0.85,
-        evaluation: 'Good skill definition.',
+      review: { reviewScore: 85 },
+      validation: {
+        overallPassed: true,
+        checks: [
+          { name: 'frontmatter_valid', status: 'passed', message: 'YAML frontmatter is valid' },
+        ],
       },
-      validation: { output: 'All checks passed.' },
+      judges: {
+        content: { normalizedScore: 0.85, evaluation: 'Good skill definition.' },
+      },
     });
 
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
 
-    const result = await runSkillReview('skills/test/SKILL.md', 70);
+    const result = await runSkillReview('skills/test/SKILL.md', 70, WS);
     expect(result.skillPath).toBe('skills/test/SKILL.md');
     expect(result.score).toBe(85);
     expect(result.passed).toBe(true);
     expect(result.error).toBeUndefined();
-    expect(result.output).toContain('All checks passed.');
+    expect(result.output).toContain('checks passed');
     expect(result.output).toContain('Good skill definition.');
+  });
+
+  test('renders scores above the legacy 1-3 scale without throwing', async () => {
+    const jsonOutput = JSON.stringify({
+      review: { reviewScore: 90 },
+      judges: {
+        content: {
+          normalizedScore: 0.9,
+          evaluation: {
+            scores: {
+              actionability: { score: 5, reasoning: 'Fully executable.' },
+              workflow_clarity: { score: 4, reasoning: 'Clear sequencing.' },
+            },
+          },
+        },
+      },
+    });
+
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
+
+    const result = await runSkillReview('a/SKILL.md', 0, WS);
+    expect(result.error).toBeUndefined();
+    // No declared scale, so the denominator comes from the highest score in the
+    // payload — the same one for every dimension, so a 4 is not full marks.
+    expect(result.output).toContain('5/5');
+    expect(result.output).toContain('4/5');
   });
 
   test('uses TESSL_BIN from setup-tessl when provided', async () => {
     const originalTesslBin = process.env.TESSL_BIN;
     const jsonOutput = JSON.stringify({
-      contentJudge: {
-        normalizedScore: 0.85,
-        evaluation: 'Good skill definition.',
-      },
+      review: { reviewScore: 85 },
+      judges: { content: { normalizedScore: 0.85, evaluation: 'Good skill definition.' } },
     });
     const spawnMock = makeMockSpawn(jsonOutput, '', 0);
 
@@ -334,14 +372,19 @@ describe('runSkillReview', () => {
       // @ts-expect-error mock assignment
       Bun.spawn = spawnMock;
 
-      await runSkillReview('skills/test/SKILL.md', 70);
+      await runSkillReview('skills/test/SKILL.md', 70, WS);
 
       const firstCall = spawnMock.mock.calls[0] as unknown[];
       expect(firstCall[0]).toEqual([
         '/runner/tool-cache/tessl/0.73.0/linux-x64/tessl',
-        'skill',
         'review',
+        'run',
+        'quality',
         '--json',
+        '--workspace',
+        WS,
+        '--threshold',
+        '0',
         'skills/test',
       ]);
     } finally {
@@ -356,10 +399,8 @@ describe('runSkillReview', () => {
   test('falls back to package binary when TESSL_BIN is blank', async () => {
     const originalTesslBin = process.env.TESSL_BIN;
     const jsonOutput = JSON.stringify({
-      contentJudge: {
-        normalizedScore: 0.85,
-        evaluation: 'Good skill definition.',
-      },
+      review: { reviewScore: 85 },
+      judges: { content: { normalizedScore: 0.85, evaluation: 'Good skill definition.' } },
     });
     const spawnMock = makeMockSpawn(jsonOutput, '', 0);
 
@@ -368,7 +409,7 @@ describe('runSkillReview', () => {
       // @ts-expect-error mock assignment
       Bun.spawn = spawnMock;
 
-      await runSkillReview('skills/test/SKILL.md', 70);
+      await runSkillReview('skills/test/SKILL.md', 70, WS);
 
       const firstCall = spawnMock.mock.calls[0] as unknown[];
       const command = firstCall[0] as string[];
@@ -386,7 +427,7 @@ describe('runSkillReview', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('', 'Command not found', 1);
 
-    const result = await runSkillReview('skills/test/SKILL.md', 50);
+    const result = await runSkillReview('skills/test/SKILL.md', 50, WS);
     expect(result.score).toBe(-1);
     expect(result.passed).toBe(false);
     expect(result.error).toBe('Command not found');
@@ -396,7 +437,7 @@ describe('runSkillReview', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('', 'some error', 1);
 
-    const result = await runSkillReview('skills/test/SKILL.md', 0);
+    const result = await runSkillReview('skills/test/SKILL.md', 0, WS);
     expect(result.passed).toBe(true);
     expect(result.score).toBe(-1);
   });
@@ -405,7 +446,7 @@ describe('runSkillReview', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('', '✘ 401 Unauthorized', 1);
 
-    const result = await runSkillReview('skills/test/SKILL.md', 0);
+    const result = await runSkillReview('skills/test/SKILL.md', 0, WS);
     expect(result.passed).toBe(false);
     expect(result.score).toBe(-1);
     expect(result.error).toContain('401 Unauthorized');
@@ -417,11 +458,96 @@ describe('runSkillReview', () => {
     expect(isAuthErrorMessage('some validation error')).toBe(false);
   });
 
+  test('an unresolvable workspace asks for the input and fails at threshold 0', async () => {
+    // What the CLI prints when it is given no workspace and the token can see
+    // more than one, which is the case for any multi-workspace account.
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn(
+      '',
+      'Missing required flag: --workspace\n\nUse --help to see usage',
+      1,
+    );
+
+    const result = await runSkillReview('skills/test/SKILL.md', 0);
+    // No review ran, so `fail-threshold: 0` must not let the check go green.
+    expect(result.passed).toBe(false);
+    expect(result.score).toBe(-1);
+    expect(result.error).toContain('Missing required flag: --workspace');
+    expect(result.error).toContain('Set the workspace input');
+    expect(result.error).toContain('tessl workspace list');
+  });
+
+  test('a skill that fails validation reports its errors, not an action error', async () => {
+    // The shape a validation-failing skill actually comes back as: the judges
+    // never run, so there is no score and no judges — only the errors that say
+    // what to fix. Rendering that as an action error would bury them.
+    const jsonOutput = JSON.stringify({
+      reviewRunId: 'rr_1',
+      validation: {
+        overallPassed: false,
+        errorCount: 2,
+        warningCount: 0,
+        checks: [
+          { name: 'body_present', status: 'passed', message: 'SKILL.md body is present' },
+          {
+            name: 'name_field',
+            status: 'error',
+            message: 'Must contain only lowercase letters, numbers, and hyphens',
+          },
+          {
+            name: 'description_field',
+            status: 'error',
+            message: "'description' field is missing from frontmatter",
+          },
+        ],
+      },
+      review: { reviewScore: null },
+    });
+
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
+
+    const result = await runSkillReview('a/SKILL.md', 70, WS);
+    expect(result.error).toBeUndefined();
+    expect(result.score).toBe(0);
+    expect(result.passed).toBe(false);
+    expect(result.validationIssues).toEqual([
+      '❌ **name_field** — Must contain only lowercase letters, numbers, and hyphens',
+      "❌ **description_field** — 'description' field is missing from frontmatter",
+    ]);
+  });
+
+  test('a payload with no review score errors instead of reporting a judge score', async () => {
+    // `review.reviewScore` is the review's own number; a judge's normalizedScore
+    // measures one rubric and sits far from it (0.2 against a review of 62), so
+    // it is not a stand-in.
+    const jsonOutput = JSON.stringify({
+      review: { reviewScore: null },
+      validation: { overallPassed: true, checks: [] },
+      judges: { content: { normalizedScore: 0.2, scale: { min: 1, max: 3 } } },
+    });
+
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
+
+    const result = await runSkillReview('a/SKILL.md', 50, WS);
+    expect(result.score).toBe(-1);
+    expect(result.error).toBe('Review completed without a score');
+  });
+
+  test('distinguishes workspace failures from score failures', () => {
+    expect(isWorkspaceErrorMessage('Missing required flag: --workspace')).toBe(true);
+    expect(isWorkspaceErrorMessage('Review run failed')).toBe(false);
+    expect(isSetupErrorMessage('✘ 401 Unauthorized')).toBe(true);
+    expect(isSetupErrorMessage('Missing required flag: --workspace')).toBe(true);
+    expect(isSetupErrorMessage('Skill has validation issues')).toBe(false);
+  });
+
   test('malformed JSON output (unclosed brace)', async () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('{ broken json !!!', '', 0);
 
-    const result = await runSkillReview('skills/test/SKILL.md', 50);
+    const result = await runSkillReview('skills/test/SKILL.md', 50, WS);
     expect(result.score).toBe(-1);
     expect(result.error).toBe('Could not parse review output');
     expect(result.passed).toBe(false);
@@ -431,7 +557,7 @@ describe('runSkillReview', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('{ not: valid: json }', '', 0);
 
-    const result = await runSkillReview('skills/test/SKILL.md', 50);
+    const result = await runSkillReview('skills/test/SKILL.md', 50, WS);
     expect(result.score).toBe(-1);
     expect(result.error).toBe('Failed to parse JSON output');
     expect(result.passed).toBe(false);
@@ -441,7 +567,7 @@ describe('runSkillReview', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('Some plain text output with no json', '', 0);
 
-    const result = await runSkillReview('skills/test/SKILL.md', 50);
+    const result = await runSkillReview('skills/test/SKILL.md', 50, WS);
     expect(result.score).toBe(-1);
     expect(result.error).toBe('Could not parse review output');
   });
@@ -449,49 +575,53 @@ describe('runSkillReview', () => {
   test('threshold pass/fail logic', async () => {
     const makeJson = (score: number) =>
       JSON.stringify({
-        contentJudge: { normalizedScore: score, evaluation: 'test' },
+        review: { reviewScore: score },
+        judges: { content: { normalizedScore: score / 100, evaluation: 'test' } },
       });
 
     // Score 60% with threshold 50 → passed
     // @ts-expect-error mock assignment
-    Bun.spawn = makeMockSpawn(makeJson(0.6), '', 0);
-    const passing = await runSkillReview('a/SKILL.md', 50);
+    Bun.spawn = makeMockSpawn(makeJson(60), '', 0);
+    const passing = await runSkillReview('a/SKILL.md', 50, WS);
     expect(passing.score).toBe(60);
     expect(passing.passed).toBe(true);
 
     // Score 40% with threshold 50 → failed
     // @ts-expect-error mock assignment
-    Bun.spawn = makeMockSpawn(makeJson(0.4), '', 0);
-    const failing = await runSkillReview('b/SKILL.md', 50);
+    Bun.spawn = makeMockSpawn(makeJson(40), '', 0);
+    const failing = await runSkillReview('b/SKILL.md', 50, WS);
     expect(failing.score).toBe(40);
     expect(failing.passed).toBe(false);
 
     // Score 50% with threshold 50 → passed (>= threshold)
     // @ts-expect-error mock assignment
-    Bun.spawn = makeMockSpawn(makeJson(0.5), '', 0);
-    const boundary = await runSkillReview('c/SKILL.md', 50);
+    Bun.spawn = makeMockSpawn(makeJson(50), '', 0);
+    const boundary = await runSkillReview('c/SKILL.md', 50, WS);
     expect(boundary.score).toBe(50);
     expect(boundary.passed).toBe(true);
 
     // Any score with threshold 0 → always passed
     // @ts-expect-error mock assignment
-    Bun.spawn = makeMockSpawn(makeJson(0.1), '', 0);
-    const noThreshold = await runSkillReview('d/SKILL.md', 0);
+    Bun.spawn = makeMockSpawn(makeJson(10), '', 0);
+    const noThreshold = await runSkillReview('d/SKILL.md', 0, WS);
     expect(noThreshold.score).toBe(10);
     expect(noThreshold.passed).toBe(true);
   });
 
   test('formats structured evaluation object into markdown', async () => {
     const jsonOutput = JSON.stringify({
-      contentJudge: {
-        normalizedScore: 0.5,
-        evaluation: {
-          scores: {
-            conciseness: { score: 2, reasoning: 'Too verbose' },
-            actionability: { score: 3, reasoning: 'Good examples' },
+      review: { reviewScore: 50 },
+      judges: {
+        content: {
+          normalizedScore: 0.5,
+          evaluation: {
+            scores: {
+              conciseness: { score: 2, reasoning: 'Too verbose' },
+              actionability: { score: 3, reasoning: 'Good examples' },
+            },
+            overall_assessment: 'Decent skill with room for improvement.',
+            suggestions: ['Be more concise', 'Add validation steps'],
           },
-          overall_assessment: 'Decent skill with room for improvement.',
-          suggestions: ['Be more concise', 'Add validation steps'],
         },
       },
     });
@@ -499,7 +629,7 @@ describe('runSkillReview', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
 
-    const result = await runSkillReview('a/SKILL.md', 0);
+    const result = await runSkillReview('a/SKILL.md', 0, WS);
     expect(result.output).toContain('| Dimension |');
     expect(result.output).toContain('| Suggestion |');
     expect(result.output).toContain('**conciseness**');
@@ -514,16 +644,124 @@ describe('runSkillReview', () => {
 
   test('JSON with prefix and suffix text', async () => {
     const json = JSON.stringify({
-      contentJudge: { normalizedScore: 0.72, evaluation: 'decent' },
+      review: { reviewScore: 72 },
+      judges: { content: { normalizedScore: 0.72, evaluation: 'decent' } },
     });
     const stdout = `Running review...\n${json}\nDone.`;
 
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn(stdout, '', 0);
 
-    const result = await runSkillReview('a/SKILL.md', 50);
+    const result = await runSkillReview('a/SKILL.md', 50, WS);
     expect(result.score).toBe(72);
     expect(result.passed).toBe(true);
+  });
+
+  test('renders dimension scores against the rubric scale', async () => {
+    // The live rubric is 1-5, and the payload carries the scale to render it by.
+    const jsonOutput = JSON.stringify({
+      review: { reviewScore: 90 },
+      judges: {
+        content: {
+          normalizedScore: 0.9,
+          scale: { min: 1, max: 5 },
+          evaluation: {
+            scores: {
+              conciseness: { score: 5, reasoning: 'Tight' },
+              actionability: { score: 4, reasoning: 'Good examples' },
+            },
+            overall_assessment: 'Strong skill.',
+            suggestions: ['Keep it up'],
+          },
+        },
+      },
+    });
+
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
+
+    const result = await runSkillReview('a/SKILL.md', 0, WS);
+    expect(result.error).toBeUndefined();
+    expect(result.output).toContain('█████ 5/5');
+    expect(result.output).toContain('████░ 4/5');
+    expect(result.overallAssessment).toBe('Strong skill.');
+  });
+
+  test('falls back to the 1-3 rubric when the judge omits a scale', async () => {
+    const jsonOutput = JSON.stringify({
+      review: { reviewScore: 60 },
+      judges: {
+        content: {
+          evaluation: { scores: { conciseness: { score: 2, reasoning: 'Verbose' } } },
+        },
+      },
+    });
+
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
+
+    const result = await runSkillReview('a/SKILL.md', 0, WS);
+    expect(result.output).toContain('██░ 2/3');
+  });
+
+  test('a score outside the scale renders without throwing', async () => {
+    const jsonOutput = JSON.stringify({
+      review: { reviewScore: 60 },
+      judges: {
+        content: {
+          scale: { min: 1, max: 3 },
+          evaluation: { scores: { conciseness: { score: 5, reasoning: 'Odd' } } },
+        },
+      },
+    });
+
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
+
+    const result = await runSkillReview('a/SKILL.md', 0, WS);
+    expect(result.error).toBeUndefined();
+    expect(result.output).toContain('5/3');
+  });
+
+  test('surfaces validation checks that did not pass', async () => {
+    const jsonOutput = JSON.stringify({
+      review: { reviewScore: 0 },
+      validation: {
+        overallPassed: false,
+        checks: [
+          { name: 'frontmatter_valid', status: 'passed', message: 'YAML frontmatter is valid' },
+          { name: 'has_description', status: 'error', message: "'description' field is missing" },
+          { name: 'relative_links', status: 'warning', message: '1 missing' },
+        ],
+      },
+      judges: { content: { normalizedScore: 0 } },
+    });
+
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
+
+    const result = await runSkillReview('a/SKILL.md', 0, WS);
+    expect(result.validationIssues).toEqual([
+      "❌ **has_description** — 'description' field is missing",
+      '⚠️ **relative_links** — 1 missing',
+    ]);
+    // Each check is rendered once: the failures above, the tally in the details.
+    expect(result.output).toContain('1/3 checks passed.');
+    expect(result.output).not.toContain('has_description');
+  });
+
+  test('omits --workspace when no workspace is configured', async () => {
+    const spawnMock = makeMockSpawn(JSON.stringify({ review: { reviewScore: 80 } }), '', 0);
+
+    // @ts-expect-error mock assignment
+    Bun.spawn = spawnMock;
+
+    await runSkillReview('skills/test/SKILL.md', 70);
+
+    const command = (spawnMock.mock.calls[0] as unknown[])[0] as string[];
+    expect(command).not.toContain('--workspace');
+    expect(command).toEqual(expect.arrayContaining(['review', 'run', 'quality', '--json']));
+    expect(command[command.length - 1]).toBe('skills/test');
   });
 });
 
@@ -658,6 +896,113 @@ describe('postOrUpdateComment', () => {
         50,
       ),
     ).rejects.toThrow('GITHUB_TOKEN is required');
+  });
+
+  test('validation issues and assessment render outside the collapsed details', async () => {
+    listCommentsMock.mockResolvedValueOnce({ data: [] });
+
+    await postOrUpdateComment(
+      [
+        {
+          skillPath: 'a/SKILL.md',
+          passed: false,
+          score: 0,
+          output: '### Validation Checks\n\n1/3 checks passed.',
+          validationIssues: ["❌ **has_description** — 'description' field is missing"],
+          overallAssessment: 'Fails validation, so the judges scored zero.',
+        },
+      ],
+      50,
+    );
+
+    const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+    const body = callArgs.body as string;
+    const beforeDetails = body.slice(0, body.indexOf('<details>'));
+    expect(beforeDetails).toContain("❌ **has_description** — 'description' field is missing");
+    expect(beforeDetails).toContain('Fails validation, so the judges scored zero.');
+  });
+
+  test('comment reports an improvement that lands outside SKILL.md', async () => {
+    listCommentsMock.mockResolvedValueOnce({ data: [] });
+
+    await postOrUpdateComment(
+      [
+        {
+          skillPath: 'skills/mine/SKILL.md',
+          passed: true,
+          score: 70,
+          output: 'review output',
+          optimize: {
+            optimized: false,
+            beforeScore: 70,
+            afterScore: 88,
+            bundleFilesChanged: ['references/helper.md'],
+          },
+        },
+      ],
+      0,
+    );
+
+    const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+    const body = callArgs.body as string;
+    expect(body).toContain('reaches 88%');
+    expect(body).toContain('`references/helper.md`');
+    expect(body).toContain('tessl review fix skills/mine');
+    // The badge stays on the score the threshold check uses.
+    expect(body).toContain('Tessl%20Review%20Score-70%25');
+    expect(body).not.toContain('no further improvements available');
+  });
+
+  test('comment keeps the affirming message when the fix cannot beat the score', async () => {
+    listCommentsMock.mockResolvedValueOnce({ data: [] });
+
+    await postOrUpdateComment(
+      [
+        {
+          skillPath: 'a/SKILL.md',
+          passed: true,
+          score: 80,
+          output: 'review output',
+          optimize: { optimized: false, beforeScore: 80, afterScore: 60 },
+        },
+      ],
+      0,
+    );
+
+    const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+    const body = callArgs.body as string;
+    expect(body).toContain('no further improvements available');
+    expect(body).not.toContain('reaches');
+  });
+
+  test('comment notes bundle files alongside an applyable SKILL.md improvement', async () => {
+    listCommentsMock.mockResolvedValueOnce({ data: [] });
+
+    await postOrUpdateComment(
+      [
+        {
+          skillPath: 'skills/mine/SKILL.md',
+          passed: true,
+          score: 60,
+          output: 'review output',
+          optimize: {
+            optimized: true,
+            beforeScore: 60,
+            afterScore: 90,
+            optimizedContent: 'improved',
+            originalContent: 'original',
+            bundleFilesChanged: ['references/extra.md'],
+          },
+        },
+      ],
+      0,
+    );
+
+    const callArgs = (createCommentMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+    const body = callArgs.body as string;
+    expect(body).toContain('60% to 90%');
+    expect(body).toContain('`references/extra.md`');
+    expect(body).toContain('Only `SKILL.md` is applied here');
   });
 
   test('comment shows optimize CTA when optimize was skipped', async () => {
@@ -1301,6 +1646,8 @@ describe('runSkillOptimize', () => {
     Bun.write = originalWrite;
   });
 
+  const WS = 'test-workspace';
+
   test('successful optimization with content change', async () => {
     const originalContent = '---\nname: test\n---\nOriginal';
     const optimizedContent = '---\nname: test\n---\nOptimized';
@@ -1318,12 +1665,12 @@ describe('runSkillOptimize', () => {
     Bun.write = mock(() => Promise.resolve(0));
 
     const jsonOutput = JSON.stringify({
-      contentJudge: { normalizedScore: 0.92 },
+      review: { reviewScore: 92 },
     });
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
 
-    const result = await runSkillOptimize('skills/test/SKILL.md', 60, 3);
+    const result = await runSkillOptimize('skills/test/SKILL.md', 60, 3, WS);
     expect(result.optimized).toBe(true);
     expect(result.beforeScore).toBe(60);
     expect(result.afterScore).toBe(92);
@@ -1342,12 +1689,12 @@ describe('runSkillOptimize', () => {
     Bun.write = mock(() => Promise.resolve(0));
 
     const jsonOutput = JSON.stringify({
-      contentJudge: { normalizedScore: 0.95 },
+      review: { reviewScore: 95 },
     });
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
 
-    const result = await runSkillOptimize('skills/test/SKILL.md', 95, 3);
+    const result = await runSkillOptimize('skills/test/SKILL.md', 95, 3, WS);
     expect(result.optimized).toBe(false);
     expect(result.beforeScore).toBe(95);
     expect(result.afterScore).toBe(95);
@@ -1369,14 +1716,14 @@ describe('runSkillOptimize', () => {
     // @ts-ignore mock assignment
     Bun.write = mock(() => Promise.resolve(0));
 
-    // Follow-up review returns a lower normalized score than beforeScore (80).
+    // Follow-up review returns a lower score than beforeScore (80).
     const jsonOutput = JSON.stringify({
-      contentJudge: { normalizedScore: 0.60 },
+      review: { reviewScore: 60 },
     });
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
 
-    const result = await runSkillOptimize('skills/test/SKILL.md', 80, 3);
+    const result = await runSkillOptimize('skills/test/SKILL.md', 80, 3, WS);
     expect(result.optimized).toBe(false);
     expect(result.beforeScore).toBe(80);
     expect(result.afterScore).toBe(60);
@@ -1396,7 +1743,7 @@ describe('runSkillOptimize', () => {
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn('', 'auth error', 1);
 
-    const result = await runSkillOptimize('skills/test/SKILL.md', 50, 3);
+    const result = await runSkillOptimize('skills/test/SKILL.md', 50, 3, WS);
     expect(result.optimized).toBe(false);
     expect(result.error).toContain('Optimize exited with code 1');
     expect(result.beforeScore).toBe(50);
@@ -1418,11 +1765,11 @@ describe('runSkillOptimize', () => {
     // @ts-ignore mock assignment
     Bun.write = writeMock;
 
-    const jsonOutput = JSON.stringify({ contentJudge: { normalizedScore: 0.9 } });
+    const jsonOutput = JSON.stringify({ review: { reviewScore: 90 } });
     // @ts-expect-error mock assignment
     Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
 
-    await runSkillOptimize('skills/test/SKILL.md', 50, 3);
+    await runSkillOptimize('skills/test/SKILL.md', 50, 3, WS);
 
     // Should have called write to restore original content
     expect(writeMock).toHaveBeenCalled();
@@ -1556,5 +1903,121 @@ describe('isSuggestionAcceptanceCommit', () => {
   test('returns false when getCommit throws (soft-fail)', async () => {
     getCommitMock.mockImplementationOnce(() => Promise.reject(new Error('API down')));
     expect(await isSuggestionAcceptanceCommit()).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. runSkillOptimize — bundle snapshot/restore (real temp dirs)
+//
+// `tessl review fix` operates on the whole skill bundle, so these tests use a
+// real directory and only mock Bun.spawn (which stands in for the CLI and
+// mutates the bundle as a side effect). They prove: (1) files the fix adds or
+// edits outside SKILL.md are reverted — no leak into the runner workspace, and
+// (2) a fix that changes only non-SKILL.md files is still scored (bundle-level
+// change detection), rather than misread as "no change" with a stale score.
+// ---------------------------------------------------------------------------
+
+describe('runSkillOptimize (bundle snapshot/restore)', () => {
+  const WS = 'test-workspace';
+  let originalSpawn: typeof Bun.spawn;
+
+  beforeEach(() => {
+    originalSpawn = Bun.spawn;
+  });
+  afterEach(() => {
+    // @ts-ignore restoring original
+    Bun.spawn = originalSpawn;
+  });
+
+  const streamOf = (text: string) =>
+    new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(text));
+        c.close();
+      },
+    });
+
+  // Mock the CLI: `review fix` runs `mutate(dir)` as its on-disk side effect;
+  // `review run quality` returns the given JSON score payload.
+  const cliMock = (mutate: (dir: string) => void, reviewJson: string) =>
+    mock((cmd: string[]) => {
+      const dir = cmd[cmd.length - 1]!;
+      const isFix = cmd.includes('fix');
+      if (isFix) mutate(dir);
+      return {
+        stdout: streamOf(isFix ? '' : reviewJson),
+        stderr: streamOf(''),
+        exited: Promise.resolve(0),
+      };
+    });
+
+  test('reverts non-SKILL.md bundle changes and still scores the run', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'skopt-'));
+    const skillPath = join(dir, 'SKILL.md');
+    const origSkill = '---\nname: t\n---\nBody';
+    await writeFile(skillPath, origSkill);
+    await mkdir(join(dir, 'references'));
+    await writeFile(join(dir, 'references', 'helper.md'), 'orig helper');
+
+    // Fix touches only bundle files, not SKILL.md.
+    // @ts-expect-error mock assignment
+    Bun.spawn = cliMock((d) => {
+      writeFileSync(join(d, 'references', 'new.md'), 'added by fix');
+      writeFileSync(join(d, 'references', 'helper.md'), 'edited by fix');
+    }, JSON.stringify({ review: { reviewScore: 88 } }));
+
+    try {
+      const result = await runSkillOptimize(skillPath, 70, 3, WS);
+      // Bundle change detected → after-score review ran despite SKILL.md unchanged.
+      expect(result.afterScore).toBe(88);
+      // No SKILL.md change → not one-click-applyable through this action, and
+      // the files that carry the improvement are named so the comment can say so.
+      expect(result.optimized).toBe(false);
+      expect(result.optimizedContent).toBeUndefined();
+      expect(result.bundleFilesChanged?.sort()).toEqual([
+        join('references', 'helper.md'),
+        join('references', 'new.md'),
+      ]);
+      // No leak: added file removed, edited file restored, SKILL.md intact.
+      const entries = await readdir(dir, { recursive: true });
+      expect(entries).not.toContain(join('references', 'new.md'));
+      expect(await readFile(join(dir, 'references', 'helper.md'), 'utf8')).toBe('orig helper');
+      expect(await readFile(skillPath, 'utf8')).toBe(origSkill);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('reverts an added bundle file when SKILL.md improves', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'skopt-'));
+    const skillPath = join(dir, 'SKILL.md');
+    const origSkill = '---\nname: t\n---\nBefore';
+    const improvedSkill = '---\nname: t\n---\nAfter (better)';
+    await writeFile(skillPath, origSkill);
+    await mkdir(join(dir, 'references'));
+    await writeFile(join(dir, 'references', 'helper.md'), 'keep me');
+
+    // @ts-expect-error mock assignment
+    Bun.spawn = cliMock((d) => {
+      writeFileSync(join(d, 'SKILL.md'), improvedSkill);
+      writeFileSync(join(d, 'references', 'extra.md'), 'added');
+    }, JSON.stringify({ review: { reviewScore: 90 } }));
+
+    try {
+      const result = await runSkillOptimize(skillPath, 60, 3, WS);
+      expect(result.optimized).toBe(true);
+      expect(result.afterScore).toBe(90);
+      expect(result.optimizedContent).toBe(improvedSkill);
+      expect(result.originalContent).toBe(origSkill);
+      // The added reference file isn't applied with SKILL.md, so it's reported.
+      expect(result.bundleFilesChanged).toEqual([join('references', 'extra.md')]);
+      // Restored: SKILL.md reverted, added file gone, helper untouched.
+      expect(await readFile(skillPath, 'utf8')).toBe(origSkill);
+      const entries = await readdir(dir, { recursive: true });
+      expect(entries).not.toContain(join('references', 'extra.md'));
+      expect(await readFile(join(dir, 'references', 'helper.md'), 'utf8')).toBe('keep me');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

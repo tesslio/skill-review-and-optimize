@@ -1,3 +1,4 @@
+import { dirname } from 'node:path';
 import * as github from '@actions/github';
 import { effectivePass } from './skill-review.ts';
 import type { SkillReviewResult } from './skill-review.ts';
@@ -36,6 +37,45 @@ export interface OptimizeContext {
   inlineSuggestionsEnabled?: boolean;
 }
 
+/**
+ * What a reader should see before expanding anything: the judge's one-line
+ * assessment, then every validation check that didn't pass. The collapsed
+ * details carry the per-dimension table and the passed-check tally.
+ */
+function reviewHighlights(result: SkillReviewResult): string {
+  const parts: string[] = [];
+  if (result.overallAssessment) {
+    parts.push(`_${result.overallAssessment}_`);
+  }
+  if (result.validationIssues && result.validationIssues.length > 0) {
+    parts.push(
+      ['**Validation**', '', ...result.validationIssues.map((i) => `- ${i}`)].join('\n'),
+    );
+  }
+  return parts.length > 0 ? `${parts.join('\n\n')}\n\n` : '';
+}
+
+function fileList(files: string[]): string {
+  return files.map((f) => `\`${f}\``).join(', ');
+}
+
+/** The command that applies a whole bundle, for the cases this action can't. */
+function fixCommand(skillPath: string): string {
+  return `\`tessl review fix ${dirname(skillPath)}\``;
+}
+
+/**
+ * Note the files a fix changed alongside SKILL.md. Only SKILL.md travels
+ * through the diff, the inline suggestions, and `/apply-optimize`, so accepting
+ * a suggestion that leans on these files leaves them behind.
+ */
+function bundleFilesNote(files: string[], skillPath: string): string {
+  return (
+    `> ℹ️ The fix also changed ${fileList(files)} in this skill bundle. ` +
+    `Only \`SKILL.md\` is applied here — run ${fixCommand(skillPath)} locally to take the rest.\n\n`
+  );
+}
+
 function formatComment(
   results: SkillReviewResult[],
   threshold: number,
@@ -68,6 +108,12 @@ function formatComment(
       const afterBadge = scoreBadge(after, 'after');
       body = `${beforeBadge} → ${afterBadge}\n\n`;
       body += `🎯 **An opportunity to take this skill from ${before}% to ${after}%.** Have a look at the suggestions below.\n\n`;
+      body += reviewHighlights(result);
+
+      const otherFiles = result.optimize.bundleFilesChanged;
+      if (otherFiles && otherFiles.length > 0) {
+        body += bundleFilesNote(otherFiles, result.skillPath);
+      }
 
       // Single source of truth for per-dimension feedback: the review table
       // (with the Suggestion column intact).
@@ -92,16 +138,31 @@ function formatComment(
       // Hidden anchor so /apply-optimize can still extract the full optimized
       // content from the comment body without cluttering the rendered view.
       body += `\n${encodeOptimizedAnchor(result.skillPath, result.optimize.optimizedContent ?? '')}\n`;
-    } else if (result.optimize && !result.optimize.optimized && !result.optimize.error) {
+    } else if (
+      result.optimize &&
+      !result.optimize.error &&
+      result.optimize.afterScore > result.optimize.beforeScore
+    ) {
+      // The fix scored higher without touching SKILL.md, so there is nothing
+      // for the diff, the suggestions, or /apply-optimize to carry. Report the
+      // score it reached and where the change would have to land.
+      const badge = result.score >= 0 ? ` ${scoreBadge(result.score)}${emoji}` : '';
+      const files = result.optimize.bundleFilesChanged ?? [];
+      const target = files.length > 0 ? fileList(files) : 'files outside `SKILL.md`';
+      body = `${badge}\n\n`;
+      body += `🔧 **\`tessl review fix\` reaches ${result.optimize.afterScore}%** by changing ${target}, which this action cannot apply for you. Run ${fixCommand(result.skillPath)} locally to take it.\n\n`;
+      body += reviewHighlights(result);
+      body += `<details>\n<summary>Review Details</summary>\n\n${result.output}\n\n</details>\n`;
+    } else if (result.optimize && !result.optimize.error) {
       // Optimize ran but didn't produce a recommendable improvement — either
       // it left the file alone, or it tried and the result regressed. In both
       // cases we keep the user's version and report it as good-as-is.
       const badge = result.score >= 0 ? ` ${scoreBadge(result.score)}${emoji}` : '';
-      body = `${badge} *(no further improvements available — keeping your version)*\n\n<details>\n<summary>Review Details</summary>\n\n${result.output}\n\n</details>\n`;
+      body = `${badge} *(no further improvements available — keeping your version)*\n\n${reviewHighlights(result)}<details>\n<summary>Review Details</summary>\n\n${result.output}\n\n</details>\n`;
     } else {
       // Standard review-only display
       const badge = result.score >= 0 ? ` ${scoreBadge(result.score)}${emoji}` : '';
-      body = `${badge}\n\n<details>\n<summary>Review Details</summary>\n\n${result.output}\n\n</details>\n`;
+      body = `${badge}\n\n${reviewHighlights(result)}<details>\n<summary>Review Details</summary>\n\n${result.output}\n\n</details>\n`;
     }
 
     return `### \`${result.skillPath}\`\n${body}`;
