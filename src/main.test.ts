@@ -477,6 +477,24 @@ describe('runSkillReview', () => {
     expect(result.error).toContain('tessl workspace list');
   });
 
+  test('a payload with no review score errors instead of reporting a judge score', async () => {
+    // `review.reviewScore` is the review's own number; a judge's normalizedScore
+    // measures one rubric and sits far from it (0.2 against a review of 62), so
+    // it is not a stand-in.
+    const jsonOutput = JSON.stringify({
+      review: { reviewScore: null },
+      validation: { overallPassed: true, checks: [] },
+      judges: { content: { normalizedScore: 0.2, scale: { min: 1, max: 3 } } },
+    });
+
+    // @ts-expect-error mock assignment
+    Bun.spawn = makeMockSpawn(jsonOutput, '', 0);
+
+    const result = await runSkillReview('a/SKILL.md', 50, WS);
+    expect(result.score).toBe(-1);
+    expect(result.error).toBe('Review completed without a score');
+  });
+
   test('distinguishes workspace failures from score failures', () => {
     expect(isWorkspaceErrorMessage('Missing required flag: --workspace')).toBe(true);
     expect(isWorkspaceErrorMessage('Review run failed')).toBe(false);

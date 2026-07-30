@@ -208,11 +208,18 @@ export interface SkillReviewResult {
   overallAssessment?: string;
 }
 
-/** Review score on a 0-100 scale. */
-function reviewScoreFrom(parsed: ReviewRunJson): number {
+/**
+ * The review score on a 0-100 scale, or `null` when the payload carries none.
+ *
+ * A judge's `normalizedScore` is deliberately not used as a substitute: it
+ * measures one rubric rather than the review, and the two are far apart. On a
+ * skill whose review scored 62, the content judge normalized to 0.2 — reporting
+ * 20% would be a wrong number rather than a missing one.
+ */
+function reviewScoreFrom(parsed: ReviewRunJson): number | null {
   return typeof parsed.review?.reviewScore === 'number'
     ? parsed.review.reviewScore
-    : Math.round((parsed.judges?.content?.normalizedScore ?? 0) * 100);
+    : null;
 }
 
 /**
@@ -393,6 +400,16 @@ export async function runSkillReview(
   }
 
   const score = reviewScoreFrom(parsed);
+  if (score === null) {
+    console.warn(`Review output carried no score for ${skillFilePath}`);
+    return {
+      skillPath: skillFilePath,
+      passed: threshold === 0,
+      score: -1,
+      output: jsonStr,
+      error: 'Review completed without a score',
+    };
+  }
 
   const content = parsed.judges?.content;
   const { issues: validationIssues, markdown: validationMarkdown } =
@@ -589,7 +606,9 @@ export async function runSkillOptimize(
     const jsonStr = extractJson(reviewStdout);
     if (jsonStr) {
       try {
-        afterScore = reviewScoreFrom(JSON.parse(jsonStr) as ReviewRunJson);
+        // A scoreless re-review leaves `beforeScore` standing, so the run reads
+        // as no improvement rather than inventing one.
+        afterScore = reviewScoreFrom(JSON.parse(jsonStr) as ReviewRunJson) ?? beforeScore;
       } catch {
         // Score parsing failed; keep beforeScore
       }
