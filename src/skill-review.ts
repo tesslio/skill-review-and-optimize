@@ -245,21 +245,34 @@ function formatValidation(
   return { issues, markdown };
 }
 
+/**
+ * Whether the CLI failed for want of credentials. The alternatives cover both
+ * ways it reports that: a run with no stored auth at all asks the reader to
+ * authenticate, and a rejected token surfaces as an authentication failure.
+ * Both phrase the remedy as `tessl login` with the command in backticks, so the
+ * pattern allows for them.
+ */
 export function isAuthErrorMessage(message: string | undefined): boolean {
   if (!message) return false;
-  return /requires you to be logged in|run tessl login|401 unauthorized|authentication required|not authenticated/i.test(
+  return /requires you to be logged in|run `?tessl login|401 unauthorized|please authenticate|authentication (failed|required)|not authenticated/i.test(
     message,
   );
 }
 
+/** The CLI's own text when it wants the flag this action's `workspace` input supplies. */
+function mentionsWorkspaceFlag(message: string): boolean {
+  return /--workspace/.test(message);
+}
+
 /**
- * Whether the CLI failed because it could not settle on a workspace. It picks
- * one on its own only when the token can see exactly one, so a token with
- * access to several needs the `workspace` input.
+ * Whether the CLI could not settle on a workspace: either it needs one — which
+ * it reports as a missing `--workspace` flag when no `tessl.json` links a
+ * project and the token can see more than one — or the workspace it was given
+ * does not exist. Neither ran a review.
  */
 export function isWorkspaceErrorMessage(message: string | undefined): boolean {
   if (!message) return false;
-  return /--workspace/.test(message);
+  return mentionsWorkspaceFlag(message) || /workspace not found/i.test(message);
 }
 
 /**
@@ -272,9 +285,14 @@ export function isSetupErrorMessage(message: string | undefined): boolean {
 }
 
 /** Guidance appended to the CLI's own error, which names a flag rather than an input. */
-const WORKSPACE_INPUT_HINT =
+const WORKSPACE_MISSING_HINT =
   'Set the workspace input to the Tessl workspace this repository reviews against. ' +
   'The token can see more than one, so the CLI cannot choose for you. ' +
+  'Run tessl workspace list to see the names.';
+
+/** Guidance for a workspace input the token cannot resolve to a workspace. */
+const WORKSPACE_UNKNOWN_HINT =
+  'Check the workspace input names a workspace this token can see. ' +
   'Run tessl workspace list to see the names.';
 
 /**
@@ -357,9 +375,15 @@ export async function runSkillReview(
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
     const cliError = stderr || stdout || `Process exited with code ${exitCode}`;
-    // The CLI asks for its `--workspace` flag; the fix is this action's input.
-    const error = isWorkspaceErrorMessage(cliError)
-      ? `${cliError.trim()}\n\n${WORKSPACE_INPUT_HINT}`
+    // The CLI's message names its own flag, or a workspace the token can't see.
+    // Either way the fix is applied through this action's input, so say so.
+    const workspaceHint = mentionsWorkspaceFlag(cliError)
+      ? WORKSPACE_MISSING_HINT
+      : isWorkspaceErrorMessage(cliError)
+        ? WORKSPACE_UNKNOWN_HINT
+        : undefined;
+    const error = workspaceHint
+      ? `${cliError.trim()}\n\n${workspaceHint}`
       : cliError;
     console.warn(
       `tessl review run failed for ${skillFilePath} (exit code ${exitCode}): ${error}`,

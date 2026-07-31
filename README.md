@@ -9,9 +9,9 @@ Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed
 > `TESSL_API_TOKEN`, and pass `tessl-token: ${{ secrets.TESSL_API_TOKEN }}`.
 > `mode: apply` (`/apply-optimize`) needs no token.
 >
-> Reviews run through **Tessl Review** (`tessl review run` / `tessl review fix`), which
-> needs Tessl CLI **0.84.0 or later**. The default `cli-version: latest` gets that
-> automatically; if you pin `cli-version`, pin 0.84.0 or later.
+> Reviews run through **Tessl Review** (`tessl review run quality` / `tessl review fix`),
+> which needs Tessl CLI **0.90.0 or later**. The default `cli-version: latest` gets that
+> automatically; if you pin `cli-version`, pin 0.90.0 or later.
 >
 > **Upgrading, and your token can see more than one Tessl workspace?** Add the
 > [`workspace`](#inputs-reference) input. Reviews run against one workspace, and the CLI can
@@ -85,11 +85,11 @@ To pin the Tessl CLI version used for review runs, add `cli-version` to the revi
 ```yaml
 - uses: tesslio/skill-review-and-optimize@ffb615138cbc689060ddb3513b97c6ec58ad842c
   with:
-    cli-version: 0.84.0
+    cli-version: 0.90.0
     tessl-token: ${{ secrets.TESSL_API_TOKEN }}
 ```
 
-Omit `cli-version` to keep using the latest Tessl CLI. Set it to a specific version when you need reproducible runs or a short rollout delay for new CLI releases. Pin **0.84.0 or later** — this action needs `tessl review run` (CLI 0.82.0) and `tessl review fix` (CLI 0.84.0), so earlier versions will fail.
+Omit `cli-version` to keep using the latest Tessl CLI. Set it to a specific version when you need reproducible runs or a short rollout delay for new CLI releases. Pin **0.90.0 or later** — this action runs `tessl review run quality`, whose `quality` subcommand first ships in CLI 0.90.0, so earlier versions fail on the argument list before a review starts.
 
 The CLI is only installed for `mode: review`; `/apply-optimize` does not need the Tessl CLI.
 
@@ -124,7 +124,7 @@ When `optimize: true`, the threshold is checked against the **post-optimize achi
 | `inline-suggestions` | Post inline `suggestion` blocks on the PR file diff | `false` |
 | `fail-threshold` | Minimum score (0-100) to pass the check. `0` = never fail. | `0` |
 | `optimize-iterations` | Max optimization iterations (1-10) | `3` |
-| `cli-version` | Tessl CLI version to install, for example `0.84.0` or `latest` (needs ≥ 0.84.0 for `review run` + `review fix`) | `latest` |
+| `cli-version` | Tessl CLI version to install, for example `0.90.0` or `latest` (needs ≥ 0.90.0 — `review run quality` first ships in 0.90.0) | `latest` |
 | `mode` | `review` (default) or `apply` (used by the `/apply-optimize` job) | `review` |
 | `path` | Root path to search for `SKILL.md` files (for monorepos) | `.` |
 | `comment` | Whether to post the summary comment | `true` |
