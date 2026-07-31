@@ -4,7 +4,8 @@ Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed
 
 > ⚠️ **Review requires a Tessl token.** Reviews run authenticated and draw on Tessl
 > credits; the old unauthenticated path is closed, so a `review` job without a
-> `tessl-token` fails with `401 Unauthorized`. Create a
+> `tessl-token` fails the check asking you to authenticate, and one whose token the
+> API rejects fails with `401 Unauthorized`. Create a
 > [Tessl API token](https://tessl.io/account/api-keys), add it as a repository secret named
 > `TESSL_API_TOKEN`, and pass `tessl-token: ${{ secrets.TESSL_API_TOKEN }}`.
 > `mode: apply` (`/apply-optimize`) needs no token.
@@ -47,7 +48,7 @@ Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed
          contents: read
        steps:
          - uses: actions/checkout@v4
-         - uses: tesslio/skill-review-and-optimize@ffb615138cbc689060ddb3513b97c6ec58ad842c
+         - uses: tesslio/skill-review-and-optimize@09c146b8daa2ce4221543659a4301fa4d024b16b
            with:
              optimize: true
              inline-suggestions: true
@@ -67,7 +68,7 @@ Enforce agent skill quality in your CI. The bot reviews every `SKILL.md` changed
          - uses: actions/checkout@v4
            with:
              fetch-depth: 0
-         - uses: tesslio/skill-review-and-optimize@ffb615138cbc689060ddb3513b97c6ec58ad842c
+         - uses: tesslio/skill-review-and-optimize@09c146b8daa2ce4221543659a4301fa4d024b16b
            with:
              mode: apply
    ```
@@ -83,7 +84,7 @@ what your token can see). Without it the review fails the check and says so.
 To pin the Tessl CLI version used for review runs, add `cli-version` to the review step:
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@ffb615138cbc689060ddb3513b97c6ec58ad842c
+- uses: tesslio/skill-review-and-optimize@09c146b8daa2ce4221543659a4301fa4d024b16b
   with:
     cli-version: 0.90.0
     tessl-token: ${{ secrets.TESSL_API_TOKEN }}
@@ -95,7 +96,7 @@ The CLI is only installed for `mode: review`; `/apply-optimize` does not need th
 
 > ⚠️ **First-time setup gotcha — `/apply-optimize` won't work on the PR that introduces this workflow.** GitHub reads `issue_comment` workflows from your **default branch only**, never from a PR branch. So the very first time you add this file, you need to land it on `main` (typically by merging the PR that added it) before `/apply-optimize` fires on any PR. After that, it works on every future PR. The review side (the summary comment + inline suggestions) is unaffected — it works from the PR branch on the very first run.
 >
-> **The pinned SHA** (`@ffb6151…`) keeps your workflow reproducible. Bump it from the [commits page](https://github.com/tesslio/skill-review-and-optimize/commits/main) when you intentionally upgrade.
+> **The pinned SHA** (`@09c146b…`) keeps your workflow reproducible. Bump it from the [commits page](https://github.com/tesslio/skill-review-and-optimize/commits/main) when you intentionally upgrade.
 >
 > **Already wired this up as two separate workflows** (`skill-review.yml` + `apply-optimize.yml`) from an earlier setup? No migration needed — both patterns work identically. The single-file workflow above is just simpler to copy from scratch.
 
@@ -104,7 +105,7 @@ The CLI is only installed for `mode: review`; `/apply-optimize` does not need th
 Add `fail-threshold` to the `review` job to fail the check when a skill scores below your minimum:
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@ffb615138cbc689060ddb3513b97c6ec58ad842c
+- uses: tesslio/skill-review-and-optimize@09c146b8daa2ce4221543659a4301fa4d024b16b
   with:
     optimize: true
     inline-suggestions: true
@@ -135,7 +136,7 @@ When `optimize: true`, the threshold is checked against the **post-optimize achi
 With `inline-suggestions: true`, every `Commit suggestion` click pushes a new commit and re-fires the workflow — by default the action re-reviews and posts a fresh summary. Set `re-review-on-suggestion-acceptance: false` to detect those commits (GitHub-signed web-flow committer + either `Apply suggestions from code review` for batch accepts or `Update <path>` with a `Co-authored-by:` trailer for single accepts) and exit early, leaving the original review in place. Plain web edits (the pencil "Edit this file" button), `/apply-optimize`, and ordinary human pushes still trigger a review.
 
 ```yaml
-- uses: tesslio/skill-review-and-optimize@ffb615138cbc689060ddb3513b97c6ec58ad842c
+- uses: tesslio/skill-review-and-optimize@09c146b8daa2ce4221543659a4301fa4d024b16b
   with:
     optimize: true
     inline-suggestions: true
