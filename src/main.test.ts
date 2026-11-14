@@ -1314,6 +1314,23 @@ describe('parseRequestedPath', () => {
 });
 
 describe('findOptimizedEntry', () => {
+  test('prefers the exact path when skills differ only by case', () => {
+    const entries = new Map([
+      ['skills/item/SKILL.md', 'lowercase'],
+      ['skills/Item/SKILL.md', 'uppercase'],
+    ]);
+    expect(findOptimizedEntry(entries, 'skills/Item/SKILL.md'))
+      .toEqual({ key: 'skills/Item/SKILL.md', content: 'uppercase' });
+  });
+
+  test('does not choose arbitrarily when a case-insensitive path is ambiguous', () => {
+    const entries = new Map([
+      ['skills/item/SKILL.md', 'lowercase'],
+      ['skills/Item/SKILL.md', 'uppercase'],
+    ]);
+    expect(findOptimizedEntry(entries, 'skills/ITEM/SKILL.md')).toBeUndefined();
+  });
+
   const optimized = new Map([
     ['discovery/SKILL.md', 'content-d'],
     ['payments/SKILL.md', 'content-p'],
@@ -1452,6 +1469,14 @@ describe('parseOptimizeIterations', () => {
 // ---------------------------------------------------------------------------
 
 describe('pickFenceLength', () => {
+  test('protects suggestion blocks from indented backtick fences', () => {
+    for (const indent of [' ', '  ', '   ']) {
+      const content = `${indent}\`\`\`\ncode\n${indent}\`\`\``;
+      expect(pickFenceLength(content)).toBe(4);
+      expect(formatSuggestionBody(content)).toBe(`\`\`\`\`suggestion\n${content}\n\`\`\`\``);
+    }
+  });
+
   test('returns 3 for plain content with no backticks', () => {
     expect(pickFenceLength('plain content')).toBe(3);
   });

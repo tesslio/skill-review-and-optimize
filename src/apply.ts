@@ -40,7 +40,8 @@ export function parseRequestedPath(commentBody: string): string | undefined {
 }
 
 /**
- * Find an entry in the optimized map by case-insensitive path match. Returns
+ * Prefer an exact path, otherwise accept a unique case-insensitive match.
+ * Ambiguous matches return undefined rather than choosing another skill. Returns
  * the canonical key (as stored by the bot's comment markers) so the actual
  * file write uses the trusted casing — important on case-sensitive
  * filesystems like the GitHub Actions Linux runner.
@@ -49,11 +50,18 @@ export function findOptimizedEntry(
   optimized: Map<string, string>,
   requestedPath: string,
 ): { key: string; content: string } | undefined {
-  const target = requestedPath.toLowerCase();
-  for (const [key, content] of optimized) {
-    if (key.toLowerCase() === target) return { key, content };
+  if (optimized.has(requestedPath)) {
+    return { key: requestedPath, content: optimized.get(requestedPath)! };
   }
-  return undefined;
+  const target = requestedPath.toLowerCase();
+  let match: { key: string; content: string } | undefined;
+  for (const [key, content] of optimized) {
+    if (key.toLowerCase() !== target) continue;
+    // A typo is recoverable only when it identifies one canonical path.
+    if (match) return undefined;
+    match = { key, content };
+  }
+  return match;
 }
 
 function extractOptimizedContent(body: string): Map<string, string> {
